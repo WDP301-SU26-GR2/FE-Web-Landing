@@ -4,6 +4,7 @@ import "./styles.css";
 import { publicApi } from "./api/public.service";
 
 const SERIES_PER_PAGE = 8;
+const VOTE_SERIES_PER_PAGE = 8;
 const LOGO_URL =
   "https://res.cloudinary.com/dbsbfvz2f/image/upload/f_auto,q_auto/Gemini_Generated_Image_d713d4d713d4d713_hlbjvd.png";
 const SYSTEM_NAME = "Manga Creation Workflow and Publishing Management System";
@@ -594,6 +595,8 @@ function VoteModal({ close, standalone = false }) {
   const [ctx, setCtx] = useState(null),
     [voteType, setVoteType] = useState("WEEKLY"),
     [selected, setSelected] = useState([]),
+    [voteQuery, setVoteQuery] = useState(""),
+    [voteSeriesPage, setVoteSeriesPage] = useState(0),
     [email, setEmail] = useState(""),
     [otp, setOtp] = useState(""),
     [notice, setNotice] = useState(""),
@@ -605,13 +608,22 @@ function VoteModal({ close, standalone = false }) {
   useEffect(() => {
     setCtx(null);
     setSelected([]);
+    setVoteQuery("");
+    setVoteSeriesPage(0);
     setSent(false);
-    Promise.all([
-      publicApi.getVoteContext(voteType),
-      publicApi.getCatalog({ publicationType: voteType, limit: 50, offset: 0 }),
-    ])
+    const loadCatalog = async () => {
+      const first = await publicApi.getCatalog({ publicationType: voteType, limit: 50, offset: 0 });
+      const pageCount = Math.ceil((first.total || 0) / 50);
+      const remaining = await Promise.all(
+        Array.from({ length: Math.max(0, pageCount - 1) }, (_, index) =>
+          publicApi.getCatalog({ publicationType: voteType, limit: 50, offset: (index + 1) * 50 }),
+        ),
+      );
+      return [first, ...remaining].flatMap((page) => page.items || []);
+    };
+    Promise.all([publicApi.getVoteContext(voteType), loadCatalog()])
       .then(([context, catalog]) => {
-        const coverById = new Map((catalog.items || []).map((series) => [series.id, series.coverImageUrl]));
+        const coverById = new Map(catalog.map((series) => [series.id, series.coverImageUrl]));
         setCtx({ ...context, series: (context.series || []).map((series) => ({ ...series, coverImageUrl: coverById.get(series.id) })) });
       })
       .catch((e) => setNotice(e.message));
@@ -621,6 +633,15 @@ function VoteModal({ close, standalone = false }) {
     const timer = window.setTimeout(() => setCooldown((value) => value - 1), 1000);
     return () => window.clearTimeout(timer);
   }, [cooldown]);
+  const filteredSeries = (ctx?.series || []).filter((series) => {
+    const haystack = `${series.title || ""} ${(series.genres || []).join(" ")}`.toLowerCase();
+    return haystack.includes(voteQuery.trim().toLowerCase());
+  });
+  const votePageCount = Math.max(1, Math.ceil(filteredSeries.length / VOTE_SERIES_PER_PAGE));
+  const displayedSeries = filteredSeries.slice(
+    voteSeriesPage * VOTE_SERIES_PER_PAGE,
+    (voteSeriesPage + 1) * VOTE_SERIES_PER_PAGE,
+  );
   const toggle = (id) =>
     setSelected((x) =>
       x.includes(id)
@@ -720,21 +741,45 @@ function VoteModal({ close, standalone = false }) {
           Chọn tối đa {ctx.maxSeriesPerVote} series thuộc cùng một tạp chí. Mỗi email có một lá
           phiếu cho mỗi loại tạp chí trong kỳ này.
         </p>
+        <div className="vote-toolbar">
+          <label className="vote-search">
+            <span>⌕</span>
+            <input
+              value={voteQuery}
+              onChange={(event) => { setVoteQuery(event.target.value); setVoteSeriesPage(0); }}
+              placeholder="Tìm series hoặc thể loại"
+            />
+          </label>
+          <div className="vote-counter"><b>{selected.length}</b> / {ctx.maxSeriesPerVote || 3} đã chọn</div>
+        </div>
         <div className="vote-options">
-          {ctx.series.map((s) => (
+          {displayedSeries.map((s) => {
+            const isSelected = selected.includes(s.id);
+            const isDisabled = !isSelected && selected.length >= (ctx.maxSeriesPerVote || 3);
+            return (
             <button
-              className={selected.includes(s.id) ? "picked" : ""}
+              className={isSelected ? "picked" : ""}
               onClick={() => toggle(s.id)}
               key={s.id}
+              disabled={isDisabled}
             >
-              <span className="vote-check">{selected.includes(s.id) ? "✓" : "+"}</span>
+              <span className="vote-check">{isSelected ? "✓" : "+"}</span>
               <span className="vote-cover">
                 {s.coverImageUrl ? <img src={s.coverImageUrl} alt="" /> : <b>{s.title?.slice(0, 1)}</b>}
               </span>
               <span className="vote-series-copy"><b>{s.title}</b><small>{s.genres?.map((g) => VI[g] || g).join(" · ")}</small></span>
             </button>
-          ))}
+            );
+          })}
         </div>
+        {!displayedSeries.length && <p className="vote-empty">Không tìm thấy series phù hợp trong tạp chí này.</p>}
+        {votePageCount > 1 && (
+          <nav className="vote-pagination" aria-label="Phân trang series bình chọn">
+            <button disabled={voteSeriesPage === 0} onClick={() => setVoteSeriesPage((current) => current - 1)}>←</button>
+            <span>Hiển thị {voteSeriesPage * VOTE_SERIES_PER_PAGE + 1}–{Math.min((voteSeriesPage + 1) * VOTE_SERIES_PER_PAGE, filteredSeries.length)} / {filteredSeries.length}</span>
+            <button disabled={voteSeriesPage >= votePageCount - 1} onClick={() => setVoteSeriesPage((current) => current + 1)}>→</button>
+          </nav>
+        )}
         <div className="vote-form">
           <input
             type="email"
