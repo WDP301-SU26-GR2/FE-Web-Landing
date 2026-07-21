@@ -63,7 +63,8 @@ function App() {
     [voteContext, setVoteContext] = useState(null),
     [reader, setReader] = useState(null),
     [detail, setDetail] = useState(null),
-    [voteOpen, setVoteOpen] = useState(false);
+    [voteOpen, setVoteOpen] = useState(false),
+    [voteRoute, setVoteRoute] = useState(() => window.location.hash === "#vote");
   const loadSeries = async () => {
     setLoading(true);
     try {
@@ -99,6 +100,11 @@ function App() {
   }, []);
   useEffect(() => {
     publicApi.getVoteContext().then(setVoteContext).catch(() => setVoteContext(null));
+  }, []);
+  useEffect(() => {
+    const syncRoute = () => setVoteRoute(window.location.hash === "#vote");
+    window.addEventListener("hashchange", syncRoute);
+    return () => window.removeEventListener("hashchange", syncRoute);
   }, []);
   const resetCatalogFilters = () => {
     setQuery("");
@@ -138,6 +144,13 @@ function App() {
     setVoteOpen(false);
     document.body.classList.remove("locked");
   };
+  const openVotePage = () => {
+    window.location.hash = "vote";
+  };
+  const closeVotePage = () => {
+    window.location.hash = "top";
+  };
+  if (voteRoute) return <VotePage close={closeVotePage} />;
   return (
     <>
       <header>
@@ -147,7 +160,7 @@ function App() {
         <nav>
           <a href="#catalog">Khám phá</a>
           <a href="#ranking">Bảng xếp hạng</a>
-          <button className="nav-vote" onClick={() => setVoteOpen(true)}>
+          <button className="nav-vote" onClick={openVotePage}>
             Bình chọn
           </button>
         </nav>
@@ -168,7 +181,7 @@ function App() {
               <a className="btn primary" href="#catalog">
                 Khám phá series <b>→</b>
               </a>
-              <button className="btn ghost" onClick={() => setVoteOpen(true)}>
+              <button className="btn ghost" onClick={openVotePage}>
                 ✦ Bình chọn ngay
               </button>
             </div>
@@ -395,7 +408,7 @@ function App() {
               Những câu chuyện được cộng đồng Kirameki yêu mến nhất ở kỳ bình
               chọn gần đây.
             </p>
-            <button className="btn primary" onClick={() => setVoteOpen(true)}>
+            <button className="btn primary" onClick={openVotePage}>
               Tham gia bình chọn <b>→</b>
             </button>
           </div>
@@ -556,7 +569,28 @@ function Reader({ reader, close, go }) {
     </div>
   );
 }
-function VoteModal({ close }) {
+function VotePage({ close }) {
+  return (
+    <div className="vote-page">
+      <header>
+        <a className="brand" href="#top">
+          <img src={LOGO_URL} alt={SYSTEM_NAME} /> <span>{SYSTEM_NAME}</span>
+        </a>
+        <button className="back-link" onClick={close}>← Về thư viện</button>
+      </header>
+      <main className="vote-page-main">
+        <div className="vote-page-intro">
+          <p className="eyebrow">READER'S CHOICE</p>
+          <h1>Phiếu bầu của bạn,<br /><i>ngôi sao tiếp theo.</i></h1>
+          <p>Khám phá các series đang tranh tài, chọn câu chuyện bạn muốn nhìn thấy ở kỳ phát hành tiếp theo.</p>
+        </div>
+        <VoteModal close={close} standalone />
+      </main>
+    </div>
+  );
+}
+
+function VoteModal({ close, standalone = false }) {
   const [ctx, setCtx] = useState(null),
     [voteType, setVoteType] = useState("WEEKLY"),
     [selected, setSelected] = useState([]),
@@ -566,12 +600,20 @@ function VoteModal({ close }) {
     [sent, setSent] = useState(false),
     [busy, setBusy] = useState(false),
     [cooldown, setCooldown] = useState(0);
+  const wrapperClass = standalone ? "vote-page-content" : "modal-wrap";
+  const cardClass = standalone ? "modal vote-modal vote-page-card" : "modal vote-modal";
   useEffect(() => {
     setCtx(null);
     setSelected([]);
     setSent(false);
-    publicApi.getVoteContext(voteType)
-      .then(setCtx)
+    Promise.all([
+      publicApi.getVoteContext(voteType),
+      publicApi.getCatalog({ publicationType: voteType, limit: 100, offset: 0 }),
+    ])
+      .then(([context, catalog]) => {
+        const coverById = new Map((catalog.items || []).map((series) => [series.id, series.coverImageUrl]));
+        setCtx({ ...context, series: (context.series || []).map((series) => ({ ...series, coverImageUrl: coverById.get(series.id) })) });
+      })
       .catch((e) => setNotice(e.message));
   }, [voteType]);
   useEffect(() => {
@@ -629,8 +671,8 @@ function VoteModal({ close }) {
   };
   if (!ctx)
     return (
-      <div className="modal-wrap">
-        <div className="modal vote-modal loading-modal">
+      <div className={wrapperClass}>
+        <div className={`${cardClass} loading-modal`}>
           <button className="close" onClick={close}>
             ×
           </button>
@@ -640,8 +682,8 @@ function VoteModal({ close }) {
     );
   if (!ctx.period)
     return (
-      <div className="modal-wrap">
-        <div className="modal vote-modal loading-modal">
+      <div className={wrapperClass}>
+        <div className={`${cardClass} loading-modal`}>
           <button className="close" onClick={close}>
             ×
           </button>
@@ -651,8 +693,8 @@ function VoteModal({ close }) {
       </div>
     );
   return (
-    <div className="modal-wrap">
-      <div className="modal vote-modal">
+    <div className={wrapperClass}>
+      <div className={cardClass}>
         <button className="close" onClick={close}>
           ×
         </button>
@@ -685,9 +727,11 @@ function VoteModal({ close }) {
               onClick={() => toggle(s.id)}
               key={s.id}
             >
-              <span>{selected.includes(s.id) ? "✓" : "+"}</span>
-              <b>{s.title}</b>
-              <small>{s.genres?.map((g) => VI[g] || g).join(" · ")}</small>
+              <span className="vote-check">{selected.includes(s.id) ? "✓" : "+"}</span>
+              <span className="vote-cover">
+                {s.coverImageUrl ? <img src={s.coverImageUrl} alt="" /> : <b>{s.title?.slice(0, 1)}</b>}
+              </span>
+              <span className="vote-series-copy"><b>{s.title}</b><small>{s.genres?.map((g) => VI[g] || g).join(" · ")}</small></span>
             </button>
           ))}
         </div>
