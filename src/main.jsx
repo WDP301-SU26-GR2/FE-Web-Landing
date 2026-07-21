@@ -752,6 +752,10 @@ function VoteModal({ close, standalone = false }) {
           </label>
           <div className="vote-counter"><b>{selected.length}</b> / {ctx.maxSeriesPerVote || 3} đã chọn</div>
         </div>
+        <div className="vote-grid-head">
+          <div><span>ĐANG TRANH TÀI</span><b>{filteredSeries.length} series để bạn khám phá</b></div>
+          <small>Chọn tối đa {ctx.maxSeriesPerVote || 3} bộ</small>
+        </div>
         <div className="vote-options">
           {displayedSeries.map((s) => {
             const isSelected = selected.includes(s.id);
