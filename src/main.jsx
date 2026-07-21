@@ -608,7 +608,7 @@ function VoteModal({ close, standalone = false }) {
     setSent(false);
     Promise.all([
       publicApi.getVoteContext(voteType),
-      publicApi.getCatalog({ publicationType: voteType, limit: 100, offset: 0 }),
+      publicApi.getCatalog({ publicationType: voteType, limit: 50, offset: 0 }),
     ])
       .then(([context, catalog]) => {
         const coverById = new Map((catalog.items || []).map((series) => [series.id, series.coverImageUrl]));
