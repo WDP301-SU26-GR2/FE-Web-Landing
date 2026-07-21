@@ -1,10 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
+import { publicApi } from "./api/public.service";
 
-const API =
-  import.meta.env.VITE_API_URL?.replace(/\/$/, "") ||
-  "https://api-mangaka.novaproj.site";
 const SERIES_PER_PAGE = 8;
 const LOGO_URL =
   "https://res.cloudinary.com/dbsbfvz2f/image/upload/f_auto,q_auto/Gemini_Generated_Image_d713d4d713d4d713_hlbjvd.png";
@@ -29,21 +27,6 @@ const VI = {
   PSYCHOLOGICAL: "Tâm lý",
 };
 
-async function api(path, options = {}) {
-  const res = await fetch(`${API}${path}`, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options,
-  });
-  const payload = await res.json().catch(() => ({}));
-  if (!res.ok || payload.success === false) {
-    const error = new Error(
-      payload.message || "Không thể kết nối tới hệ thống.",
-    );
-    error.retryAfter = payload.retryAfter;
-    throw error;
-  }
-  return payload.data ?? payload;
-}
 const formatDate = (date) =>
   date
     ? new Intl.DateTimeFormat("vi-VN", {
@@ -69,23 +52,30 @@ function App() {
     [error, setError] = useState("");
   const [query, setQuery] = useState(""),
     [genre, setGenre] = useState(""),
+    [demographic, setDemographic] = useState(""),
+    [publicationType, setPublicationType] = useState(""),
     [tab, setTab] = useState(""),
     [page, setPage] = useState(0);
   const [ranking, setRanking] = useState({ period: null, results: [] }),
+    [rankingPeriods, setRankingPeriods] = useState([]),
+    [rankingPeriodId, setRankingPeriodId] = useState(""),
+    [rankingType, setRankingType] = useState(""),
+    [voteContext, setVoteContext] = useState(null),
     [reader, setReader] = useState(null),
     [detail, setDetail] = useState(null),
     [voteOpen, setVoteOpen] = useState(false);
   const loadSeries = async () => {
     setLoading(true);
     try {
-      const qs = new URLSearchParams({
-        limit: String(SERIES_PER_PAGE),
-        offset: String(page * SERIES_PER_PAGE),
+      const data = await publicApi.getCatalog({
+        limit: SERIES_PER_PAGE,
+        offset: page * SERIES_PER_PAGE,
+        q: query,
+        genre,
+        demographic,
+        publicationType,
+        status: tab,
       });
-      if (query) qs.set("q", query);
-      if (genre) qs.set("genre", genre);
-      if (tab) qs.set("status", tab);
-      const data = await api(`/public/series?${qs}`);
       setSeries(data.items || []);
       setTotal(data.total || 0);
       setError("");
@@ -98,15 +88,35 @@ function App() {
   useEffect(() => {
     const id = setTimeout(loadSeries, 250);
     return () => clearTimeout(id);
-  }, [query, genre, tab, page]);
+  }, [query, genre, demographic, publicationType, tab, page]);
   useEffect(() => {
-    api("/vote/results/latest")
-      .then(setRanking)
+    Promise.all([publicApi.getLatestRankingResults(), publicApi.getVotePeriods()])
+      .then(([latest, periods]) => {
+        setRanking(latest);
+        setRankingPeriods(periods.items || periods || []);
+      })
       .catch(() => {});
   }, []);
+  useEffect(() => {
+    publicApi.getVoteContext().then(setVoteContext).catch(() => setVoteContext(null));
+  }, []);
+  const resetCatalogFilters = () => {
+    setQuery("");
+    setGenre("");
+    setDemographic("");
+    setPublicationType("");
+    setTab("");
+    setPage(0);
+  };
+  useEffect(() => {
+    const loadRanking = rankingPeriodId
+      ? publicApi.getRankingResults(rankingPeriodId, rankingType || undefined)
+      : publicApi.getLatestRankingResults(rankingType || undefined);
+    loadRanking.then(setRanking).catch(() => {});
+  }, [rankingPeriodId, rankingType]);
   const openDetail = async (id) => {
     try {
-      const data = await api(`/public/series/${id}`);
+      const data = await publicApi.getSeriesDetail(id);
       setDetail(data);
       document.body.classList.add("locked");
     } catch (e) {
@@ -115,7 +125,7 @@ function App() {
   };
   const openReader = async (id) => {
     try {
-      const data = await api(`/public/chapters/${id}/pages`);
+      const data = await publicApi.getChapterPages(id);
       setReader(data);
       document.body.classList.add("locked");
     } catch (e) {
@@ -161,6 +171,11 @@ function App() {
               <button className="btn ghost" onClick={() => setVoteOpen(true)}>
                 ✦ Bình chọn ngay
               </button>
+            </div>
+            <div className="hero-proof" aria-label="Thông tin thư viện">
+              <div><strong>{total || "—"}</strong><span>series đang mở</span></div>
+              <div><strong>{ranking.results?.length || "—"}</strong><span>tác phẩm xếp hạng</span></div>
+              <div className={voteContext?.period ? "live" : ""}><strong>{voteContext?.period ? "LIVE" : "SOON"}</strong><span>{voteContext?.period ? "kỳ bình chọn đang mở" : "đón kỳ bình chọn mới"}</span></div>
             </div>
           </div>
           <div className="hero-art">
@@ -258,7 +273,27 @@ function App() {
                 </option>
               ))}
             </select>
+            <select className="genre-filter" value={publicationType} onChange={(e) => { setPublicationType(e.target.value); setPage(0); }}>
+              <option value="">Mọi nhịp xuất bản</option>
+              <option value="WEEKLY">Hàng tuần</option>
+              <option value="MONTHLY">Hàng tháng</option>
+              <option value="IRREGULAR">Không định kỳ</option>
+            </select>
+            <select className="genre-filter" value={demographic} onChange={(e) => { setDemographic(e.target.value); setPage(0); }}>
+              <option value="">Mọi đối tượng</option>
+              <option value="SHONEN">Shōnen</option>
+              <option value="SHOJO">Shōjo</option>
+              <option value="SEINEN">Seinen</option>
+              <option value="JOSEI">Josei</option>
+              <option value="KODOMO">Kodomo</option>
+            </select>
           </div>
+          {(query || genre || demographic || publicationType || tab) && (
+            <div className="active-filters">
+              <span>Đang lọc thư viện theo lựa chọn của bạn</span>
+              <button onClick={resetCatalogFilters}>Xóa tất cả ×</button>
+            </div>
+          )}
           {error && (
             <div className="alert">
               {error}
@@ -286,6 +321,7 @@ function App() {
                         </div>
                       )}
                       <span>{status(item.status)}</span>
+                      <span className="cover-action">Khám phá <b>↗</b></span>
                     </button>
                     <div className="series-info">
                       <div>
@@ -372,8 +408,24 @@ function App() {
                   : "Đang cập nhật"}
               </small>
             </div>
+            <div className="ranking-filters">
+              <select value={rankingPeriodId} onChange={(e) => setRankingPeriodId(e.target.value)}>
+                <option value="">Kỳ mới nhất</option>
+                {rankingPeriods.map((period) => (
+                  <option key={period.id} value={period.id}>
+                    Kỳ #{period.reflectedIssueNumber || period.issueNumber || period.id}
+                  </option>
+                ))}
+              </select>
+              <select value={rankingType} onChange={(e) => setRankingType(e.target.value)}>
+                <option value="">Tất cả tạp chí</option>
+                <option value="WEEKLY">Tuần</option>
+                <option value="MONTHLY">Tháng</option>
+                <option value="IRREGULAR">Không định kỳ</option>
+              </select>
+            </div>
             {ranking.results?.slice(0, 5).map((r, i) => (
-              <div className="rank-row" key={r.seriesId}>
+              <div className={`rank-row rank-${i + 1}`} key={r.seriesId}>
                 <strong>0{i + 1}</strong>
                 <div>
                   <h3>{r.seriesTitle || "Series không còn hiển thị"}</h3>
@@ -437,6 +489,10 @@ function SeriesModal({ detail, close, read }) {
             {detail.publicationType || "SERIES"} · {status(detail.status)}
           </p>
           <h2>{detail.title}</h2>
+          <div className="detail-stats">
+            <span>{detail.chapters?.length || 0} chương đã phát hành</span>
+            <span>{detail.mangaka?.displayName || detail.mangakaName || "Tác giả Kirameki"}</span>
+          </div>
           <div className="tags">
             {detail.genres?.map((g) => (
               <span key={g}>{VI[g] || g}</span>
@@ -473,6 +529,7 @@ function Reader({ reader, close, go }) {
           ↑ Đầu trang
         </button>
       </div>
+      <div className="reader-progress"><span>Đọc trọn chương</span><b>{reader.pages.length} trang</b></div>
       <div className="pages">
         {reader.pages.map((p) => (
           <img
@@ -501,18 +558,27 @@ function Reader({ reader, close, go }) {
 }
 function VoteModal({ close }) {
   const [ctx, setCtx] = useState(null),
+    [voteType, setVoteType] = useState("WEEKLY"),
     [selected, setSelected] = useState([]),
     [email, setEmail] = useState(""),
     [otp, setOtp] = useState(""),
     [notice, setNotice] = useState(""),
     [sent, setSent] = useState(false),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [cooldown, setCooldown] = useState(0);
   useEffect(() => {
-    api("/vote/context")
+    setCtx(null);
+    setSelected([]);
+    setSent(false);
+    publicApi.getVoteContext(voteType)
       .then(setCtx)
       .catch((e) => setNotice(e.message));
-  }, []);
-  const token = "kirameki-guest";
+  }, [voteType]);
+  useEffect(() => {
+    if (!cooldown) return undefined;
+    const timer = window.setTimeout(() => setCooldown((value) => value - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [cooldown]);
   const toggle = (id) =>
     setSelected((x) =>
       x.includes(id)
@@ -522,32 +588,34 @@ function VoteModal({ close }) {
           : x,
     );
   const send = async () => {
+    if (!email.includes("@")) {
+      setNotice("Vui lòng nhập địa chỉ email hợp lệ.");
+      return;
+    }
     setBusy(true);
     try {
-      await api("/vote/otp", {
-        method: "POST",
-        body: JSON.stringify({ identity: email, captchaToken: token }),
-      });
+      await publicApi.sendVoteOtp(email);
       setSent(true);
       setNotice("Mã xác nhận đã được gửi đến email của bạn.");
     } catch (e) {
       setNotice(e.message);
+      if (e.retryAfter) setCooldown(e.retryAfter);
     } finally {
       setBusy(false);
     }
   };
   const vote = async () => {
+    if (otp.trim().length !== 6) {
+      setNotice("Vui lòng nhập mã OTP gồm 6 chữ số.");
+      return;
+    }
     setBusy(true);
     try {
-      await api("/vote", {
-        method: "POST",
-        body: JSON.stringify({
-          surveyPeriodId: ctx.period.id,
-          identity: email,
-          otpCode: otp,
-          seriesIds: selected,
-          captchaToken: token,
-        }),
+      await publicApi.submitVote({
+        surveyPeriodId: ctx.period.id,
+        identity: email,
+        otpCode: otp,
+        seriesIds: selected,
       });
       setNotice(
         "Bình chọn thành công. Cảm ơn bạn đã cùng Kirameki chọn ra những câu chuyện tuyệt vời!",
@@ -589,14 +657,26 @@ function VoteModal({ close }) {
           ×
         </button>
         <p className="eyebrow">KỲ BÌNH CHỌN #{ctx.period.issueNumber || ""}</p>
+        <div className="vote-types" role="tablist" aria-label="Loại tạp chí">
+          {["WEEKLY", "MONTHLY", "IRREGULAR"].map((type) => (
+            <button
+              key={type}
+              className={voteType === type ? "picked" : ""}
+              onClick={() => setVoteType(type)}
+              type="button"
+            >
+              {type === "WEEKLY" ? "Tuần" : type === "MONTHLY" ? "Tháng" : "Không định kỳ"}
+            </button>
+          ))}
+        </div>
         <h2>
           Chọn câu chuyện
           <br />
           <i>bạn yêu thích.</i>
         </h2>
         <p className="vote-help">
-          Chọn tối đa {ctx.maxSeriesPerVote} series. Mỗi email chỉ có một lá
-          phiếu trong kỳ này.
+          Chọn tối đa {ctx.maxSeriesPerVote} series thuộc cùng một tạp chí. Mỗi email có một lá
+          phiếu cho mỗi loại tạp chí trong kỳ này.
         </p>
         <div className="vote-options">
           {ctx.series.map((s) => (
@@ -627,10 +707,10 @@ function VoteModal({ close }) {
           )}
           <button
             className="btn primary"
-            disabled={busy || !email || !selected.length || (!sent && false)}
+            disabled={busy || cooldown > 0 || !email || !selected.length}
             onClick={sent ? vote : send}
           >
-            {busy ? "Đang xử lý..." : sent ? "Gửi lá phiếu →" : "Nhận mã OTP →"}
+            {busy ? "Đang xử lý..." : sent ? "Gửi lá phiếu →" : cooldown ? `Gửi lại sau ${cooldown}s` : "Nhận mã OTP →"}
           </button>
         </div>
         {notice && <p className="vote-notice">{notice}</p>}
