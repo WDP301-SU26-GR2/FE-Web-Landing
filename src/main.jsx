@@ -571,6 +571,23 @@ function Reader({ reader, close, go }) {
   );
 }
 function VotePage({ close }) {
+  const [reader, setReader] = useState(null);
+  const [readerError, setReaderError] = useState("");
+  const openLatestChapter = async (seriesId) => {
+    try {
+      setReaderError("");
+      const series = await publicApi.getSeriesDetail(seriesId);
+      const latestChapter = [...(series.chapters || [])].sort((a, b) => b.chapterNumber - a.chapterNumber)[0];
+      if (!latestChapter) {
+        setReaderError("Series này chưa có chương đã xuất bản để đọc.");
+        return;
+      }
+      setReader(await publicApi.getChapterPages(latestChapter.id));
+    } catch (error) {
+      setReaderError(error.message || "Không thể mở chương truyện này.");
+    }
+  };
+  if (reader) return <Reader reader={reader} close={() => setReader(null)} go={async (chapterId) => setReader(await publicApi.getChapterPages(chapterId))} />;
   return (
     <div className="vote-page">
       <header>
@@ -585,13 +602,13 @@ function VotePage({ close }) {
           <h1>Phiếu bầu của bạn,<br /><i>ngôi sao tiếp theo.</i></h1>
           <p>Khám phá các series đang tranh tài, chọn câu chuyện bạn muốn nhìn thấy ở kỳ phát hành tiếp theo.</p>
         </div>
-        <VoteModal close={close} standalone />
+        <VoteModal close={close} standalone onRead={openLatestChapter} readError={readerError} />
       </main>
     </div>
   );
 }
 
-function VoteModal({ close, standalone = false }) {
+function VoteModal({ close, standalone = false, onRead, readError }) {
   const [ctx, setCtx] = useState(null),
     [voteType, setVoteType] = useState("WEEKLY"),
     [selected, setSelected] = useState([]),
@@ -761,21 +778,25 @@ function VoteModal({ close, standalone = false }) {
             const isSelected = selected.includes(s.id);
             const isDisabled = !isSelected && selected.length >= (ctx.maxSeriesPerVote || 3);
             return (
-            <button
-              className={isSelected ? "picked" : ""}
-              onClick={() => toggle(s.id)}
-              key={s.id}
-              disabled={isDisabled}
-            >
-              <span className="vote-check">{isSelected ? "✓" : "+"}</span>
-              <span className="vote-cover">
-                {s.coverImageUrl ? <img src={s.coverImageUrl} alt="" /> : <b>{s.title?.slice(0, 1)}</b>}
-              </span>
-              <span className="vote-series-copy"><b>{s.title}</b><small>{s.genres?.map((g) => VI[g] || g).join(" · ")}</small></span>
-            </button>
+            <article className={`vote-series-card ${isSelected ? "picked" : ""}`} key={s.id}>
+              <button
+                className="vote-select"
+                onClick={() => toggle(s.id)}
+                disabled={isDisabled}
+                aria-pressed={isSelected}
+              >
+                <span className="vote-check">{isSelected ? "✓" : "+"}</span>
+                <span className="vote-cover">
+                  {s.coverImageUrl ? <img src={s.coverImageUrl} alt="" /> : <b>{s.title?.slice(0, 1)}</b>}
+                </span>
+                <span className="vote-series-copy"><b>{s.title}</b><small>{s.genres?.map((g) => VI[g] || g).join(" · ")}</small></span>
+              </button>
+              {onRead && <button className="vote-read" onClick={() => onRead(s.id)}>Đọc mới nhất ↗</button>}
+            </article>
             );
           })}
         </div>
+        {readError && <p className="vote-read-error">{readError}</p>}
         {!displayedSeries.length && <p className="vote-empty">Không tìm thấy series phù hợp trong tạp chí này.</p>}
         {votePageCount > 1 && (
           <nav className="vote-pagination" aria-label="Phân trang series bình chọn">
