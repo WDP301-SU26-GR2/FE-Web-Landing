@@ -546,6 +546,8 @@ function VotePage({ close }) {
   );
 }
 
+/* Replaced by src/components/VotePanel.jsx; retained source is removed from the bundle. */
+/*
 function VoteModal({ close, standalone = false, onRead, readError }) {
   const [ctx, setCtx] = useState(null),
     [voteType, setVoteType] = useState("WEEKLY"),
@@ -770,4 +772,5 @@ function VoteModal({ close, standalone = false, onRead, readError }) {
     </div>
   );
 }
+*/
 createRoot(document.getElementById("root")).render(<App />);
