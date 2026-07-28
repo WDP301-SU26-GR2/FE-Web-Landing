@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { publicApi } from "../api/public.service";
+import { IS_RECAPTCHA_CONFIGURED } from "../config/env";
 import { getRecaptchaToken } from "../lib/recaptcha";
 import { subscribeToVoteTally } from "../lib/vote-socket";
 import {
@@ -16,26 +17,32 @@ async function getCatalogCoverMap(publicationType) {
     limit: 50,
     offset: 0,
   });
-  const pageCount = Math.ceil((firstPage.total || 0) / 50);
-  const pages = await Promise.all(
-    Array.from({ length: Math.max(0, pageCount - 1) }, (_, index) =>
-      publicApi.getCatalog({
-        publicationType,
-        limit: 50,
-        offset: (index + 1) * 50,
-      }),
-    ),
+  const covers = new Map(
+    (firstPage.items || []).map((series) => [series.id, series.coverImageUrl]),
   );
 
-  return new Map(
-    [firstPage, ...pages]
-      .flatMap((page) => page.items || [])
-      .map((series) => [series.id, series.coverImageUrl]),
-  );
+  // The public catalog caps a page at 50. Fetch subsequent pages in sequence so
+  // opening the ballot never creates a burst that trips the public rate limiter.
+  for (let offset = 50; offset < (firstPage.total || 0); offset += 50) {
+    const page = await publicApi.getCatalog({
+      publicationType,
+      limit: 50,
+      offset,
+    });
+    (page.items || []).forEach((series) => {
+      covers.set(series.id, series.coverImageUrl);
+    });
+  }
+
+  return covers;
 }
 
 function getErrorKey(error) {
   return error?.code || error?.message || "";
+}
+
+function isError(error, key) {
+  return getErrorKey(error).includes(key);
 }
 
 export function VotePanel({ onRead, readError }) {
@@ -50,31 +57,43 @@ export function VotePanel({ onRead, readError }) {
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
   const [cooldown, setCooldown] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loadingPeriods, setLoadingPeriods] = useState(true);
+  const [loadingContext, setLoadingContext] = useState(false);
+  const [openPeriodsError, setOpenPeriodsError] = useState("");
+  const [contextError, setContextError] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [coverNotice, setCoverNotice] = useState("");
   const [liveStatus, setLiveStatus] = useState("");
   const [periodClosed, setPeriodClosed] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [periodsRevision, setPeriodsRevision] = useState(0);
+  const [periodRevision, setPeriodRevision] = useState(0);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
+    setLoadingPeriods(true);
+    setOpenPeriodsError("");
+
     publicApi
       .getOpenVotePeriods()
       .then((data) => {
         if (!active) return;
         const periods = data.items || [];
         setOpenPeriods(periods);
-        setSelectedPeriodId(periods[0]?.id || "");
+        setSelectedPeriodId((current) =>
+          periods.some((period) => period.id === current)
+            ? current
+            : periods[0]?.id || "",
+        );
       })
-      .catch((error) => active && setNotice(error.message))
-      .finally(() => active && setLoading(false));
+      .catch((error) => active && setOpenPeriodsError(error.message))
+      .finally(() => active && setLoadingPeriods(false));
 
     return () => {
       active = false;
     };
-  }, []);
+  }, [periodsRevision]);
 
   useEffect(() => {
     if (!selectedPeriodId) return undefined;
@@ -90,36 +109,68 @@ export function VotePanel({ onRead, readError }) {
     setOtpSent(false);
     setCooldown(0);
     setNotice("");
+    setCoverNotice("");
     setLiveStatus("");
+    setContextError("");
     setPeriodClosed(false);
     setSubmitted(false);
+    setLoadingContext(true);
 
-    Promise.all([
-      publicApi.getVoteContext(selectedPeriodId),
-      publicApi.getVoteLive(selectedPeriodId),
-    ])
-      .then(async ([voteContext, voteTally]) => {
-        const covers = await getCatalogCoverMap(
-          voteContext.period.publicationType,
-        );
+    const loadContext = async () => {
+      try {
+        const voteContext = await publicApi.getVoteContext(selectedPeriodId);
         if (!active) return;
-        setContext({
-          ...voteContext,
-          series: (voteContext.series || []).map((series) => ({
-            ...series,
-            coverImageUrl: covers.get(series.id) || null,
-          })),
-        });
-        setTally(voteTally);
-      })
-      .catch((error) => {
+
+        // A cover is cosmetic. Keep the ballot fully usable while signed public
+        // URLs are resolved, and retain placeholders when that optional request fails.
+        setContext(voteContext);
+        setLoadingContext(false);
+        void getCatalogCoverMap(voteContext.period.publicationType)
+          .then((covers) => {
+            if (!active) return;
+            setContext((current) =>
+              current?.period?.id === voteContext.period.id
+                ? {
+                    ...current,
+                    series: (current.series || []).map((series) => ({
+                      ...series,
+                      coverImageUrl: covers.get(series.id) || null,
+                    })),
+                  }
+                : current,
+            );
+          })
+          .catch(() => {
+            if (active) {
+              setCoverNotice(
+                "Không thể tải ảnh bìa lúc này; bạn vẫn có thể chọn và bình chọn series.",
+              );
+            }
+          });
+      } catch (error) {
         if (!active) return;
+        setContextError(error.message);
         setNotice(error.message);
-        if (getErrorKey(error).includes("SurveyPeriodNotOpen")) {
-          setPeriodClosed(true);
-        }
-      });
+        if (isError(error, "SurveyPeriodNotOpen")) setPeriodClosed(true);
+        setLoadingContext(false);
+      }
+    };
 
+    const loadTally = async () => {
+      try {
+        const voteTally = await publicApi.getVoteLive(selectedPeriodId);
+        if (active) setTally(voteTally);
+      } catch (error) {
+        if (!active) return;
+        if (isError(error, "SurveyPeriodNotOpen")) setPeriodClosed(true);
+        setLiveStatus(
+          "Chưa thể tải lượt chọn trực tiếp; hãy thử lại sau ít phút.",
+        );
+      }
+    };
+
+    void loadContext();
+    void loadTally();
     const unsubscribe = subscribeToVoteTally(
       selectedPeriodId,
       (nextTally) => active && setTally(nextTally),
@@ -130,7 +181,7 @@ export function VotePanel({ onRead, readError }) {
       active = false;
       unsubscribe();
     };
-  }, [selectedPeriodId]);
+  }, [selectedPeriodId, periodRevision]);
 
   useEffect(() => {
     if (!cooldown) return undefined;
@@ -159,23 +210,25 @@ export function VotePanel({ onRead, readError }) {
   );
   const maxSelections = context?.maxSeriesPerVote || 3;
 
-  const handlePeriodChange = (periodId) => {
-    if (periodId !== selectedPeriodId) setSelectedPeriodId(periodId);
-  };
-
   const handleVoteError = (error) => {
-    const key = getErrorKey(error);
     setNotice(error.message || "Không thể hoàn tất bình chọn.");
     if (error.retryAfter) setCooldown(error.retryAfter);
-    if (
-      key.includes("ReaderAlreadyVoted") ||
-      key.includes("SurveyPeriodNotOpen")
-    ) {
-      setPeriodClosed(true);
+
+    if (isError(error, "ReaderAlreadyVoted")) {
+      // The uniqueness rule is tied to this identity, not to this browser. Keep
+      // the period available so another reader can vote from the same device.
+      setOtpSent(false);
+      setOtp("");
+      return;
     }
+    if (isError(error, "SurveyPeriodNotOpen")) setPeriodClosed(true);
   };
 
   const requestOtp = async () => {
+    if (!IS_RECAPTCHA_CONFIGURED) {
+      setNotice("Bình chọn tạm thời chưa sẵn sàng vì reCAPTCHA chưa được cấu hình.");
+      return;
+    }
     if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
       setNotice("Vui lòng nhập địa chỉ email hợp lệ.");
       return;
@@ -193,6 +246,7 @@ export function VotePanel({ onRead, readError }) {
         identity: email.trim(),
         captchaToken,
       });
+      setOtp("");
       setOtpSent(true);
       setNotice("Mã xác nhận đã được gửi đến email của bạn.");
     } catch (error) {
@@ -228,8 +282,20 @@ export function VotePanel({ onRead, readError }) {
     }
   };
 
-  if (loading) {
+  if (loadingPeriods) {
     return <div className="vote-empty-state">Đang tìm kỳ bình chọn...</div>;
+  }
+
+  if (openPeriodsError && !openPeriods.length) {
+    return (
+      <section className="vote-empty-state vote-error-state" role="alert">
+        <h2>Chưa thể tải trang bình chọn</h2>
+        <p>{openPeriodsError}</p>
+        <button className="btn primary" type="button" onClick={() => setPeriodsRevision((value) => value + 1)}>
+          Thử lại
+        </button>
+      </section>
+    );
   }
 
   if (!openPeriods.length) {
@@ -255,7 +321,7 @@ export function VotePanel({ onRead, readError }) {
             key={period.id}
             type="button"
             className={period.id === selectedPeriodId ? "picked" : ""}
-            onClick={() => handlePeriodChange(period.id)}
+            onClick={() => period.id !== selectedPeriodId && setSelectedPeriodId(period.id)}
             aria-pressed={period.id === selectedPeriodId}
           >
             {formatVotePeriod(period)}
@@ -263,14 +329,34 @@ export function VotePanel({ onRead, readError }) {
         ))}
       </div>
 
-      {!context ? (
+      {openPeriodsError && <p className="vote-notice">{openPeriodsError}</p>}
+      {!IS_RECAPTCHA_CONFIGURED && (
+        <p className="vote-config-warning" role="alert">
+          Bình chọn đang tạm khóa: thiếu cấu hình reCAPTCHA ở môi trường này.
+        </p>
+      )}
+
+      {loadingContext && (
         <p className="vote-empty-state">Đang tải danh sách series được bình chọn...</p>
-      ) : (
+      )}
+      {contextError && (
+        <div className="vote-context-error" role="alert">
+          <p>{contextError}</p>
+          {!periodClosed && (
+            <button className="btn ghost" type="button" onClick={() => setPeriodRevision((value) => value + 1)}>
+              Tải lại kỳ này
+            </button>
+          )}
+        </div>
+      )}
+
+      {context && (
         <>
           <p className="vote-help">
             {selectedPeriod && `Bạn đang bình chọn cho ${formatVotePeriod(selectedPeriod)}. `}
             Chọn tối đa {maxSelections} series trong kỳ này.
           </p>
+          {coverNotice && <p className="vote-cover-notice">{coverNotice}</p>}
           <div className="vote-toolbar">
             <label className="vote-search">
               <span>⌕</span>
@@ -341,22 +427,14 @@ export function VotePanel({ onRead, readError }) {
           )}
           {pageCount > 1 && (
             <nav className="vote-pagination" aria-label="Phân trang series bình chọn">
-              <button
-                type="button"
-                disabled={seriesPage === 0}
-                onClick={() => setSeriesPage((page) => page - 1)}
-              >
+              <button type="button" disabled={seriesPage === 0} onClick={() => setSeriesPage((page) => page - 1)}>
                 ←
               </button>
               <span>
                 {seriesPage * SERIES_PER_PAGE + 1}–
                 {Math.min((seriesPage + 1) * SERIES_PER_PAGE, filteredSeries.length)} / {filteredSeries.length}
               </span>
-              <button
-                type="button"
-                disabled={seriesPage >= pageCount - 1}
-                onClick={() => setSeriesPage((page) => page + 1)}
-              >
+              <button type="button" disabled={seriesPage >= pageCount - 1} onClick={() => setSeriesPage((page) => page + 1)}>
                 →
               </button>
             </nav>
@@ -365,7 +443,7 @@ export function VotePanel({ onRead, readError }) {
             <input
               type="email"
               value={email}
-              disabled={periodClosed || submitted}
+              disabled={periodClosed || submitted || otpSent}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="Email của bạn"
             />
@@ -378,30 +456,43 @@ export function VotePanel({ onRead, readError }) {
                 placeholder="Mã OTP gồm 6 số"
               />
             )}
-            <button
-              className="btn primary"
-              type="button"
-              disabled={
-                busy ||
-                cooldown > 0 ||
-                periodClosed ||
-                submitted ||
-                !selectedIds.length
-              }
-              onClick={otpSent ? submitBallot : requestOtp}
-            >
-              {busy
-                ? "Đang xử lý..."
-                : submitted
-                  ? "Đã gửi phiếu"
-                  : periodClosed
-                    ? "Kỳ này đã đóng"
-                    : cooldown
-                      ? `Gửi lại sau ${formatCooldown(cooldown)}`
-                      : otpSent
-                        ? "Gửi lá phiếu →"
-                        : "Nhận mã OTP →"}
-            </button>
+            <div className="vote-actions">
+              <button
+                className="btn primary"
+                type="button"
+                disabled={
+                  busy ||
+                  cooldown > 0 ||
+                  periodClosed ||
+                  submitted ||
+                  !selectedIds.length ||
+                  !IS_RECAPTCHA_CONFIGURED
+                }
+                onClick={otpSent ? submitBallot : requestOtp}
+              >
+                {busy
+                  ? "Đang xử lý..."
+                  : submitted
+                    ? "Đã gửi phiếu"
+                    : periodClosed
+                      ? "Kỳ này đã đóng"
+                      : cooldown
+                        ? `Thử lại sau ${formatCooldown(cooldown)}`
+                        : otpSent
+                          ? "Gửi lá phiếu →"
+                          : "Nhận mã OTP →"}
+              </button>
+              {otpSent && !submitted && !periodClosed && (
+                <>
+                  <button className="vote-secondary-action" type="button" disabled={busy || cooldown > 0 || !IS_RECAPTCHA_CONFIGURED} onClick={requestOtp}>
+                    Gửi lại OTP
+                  </button>
+                  <button className="vote-secondary-action" type="button" disabled={busy} onClick={() => { setOtpSent(false); setOtp(""); setNotice(""); }}>
+                    Đổi email
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </>
       )}

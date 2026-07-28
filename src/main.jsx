@@ -62,32 +62,38 @@ function App() {
   const [hasOpenVotePeriod, setHasOpenVotePeriod] = useState(false),
     [reader, setReader] = useState(null),
     [detail, setDetail] = useState(null),
-    [voteRoute, setVoteRoute] = useState(() => window.location.hash === "#vote");
-  const loadSeries = async () => {
-    setLoading(true);
-    try {
-      const data = await publicApi.getCatalog({
-        limit: SERIES_PER_PAGE,
-        offset: page * SERIES_PER_PAGE,
-        q: query,
-        genre,
-        demographic,
-        publicationType,
-        status: tab,
-      });
-      setSeries(data.items || []);
-      setTotal(data.total || 0);
-      setError("");
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+    [voteRoute, setVoteRoute] = useState(() => window.location.hash === "#vote"),
+    [catalogRevision, setCatalogRevision] = useState(0);
   useEffect(() => {
-    const id = setTimeout(loadSeries, 250);
-    return () => clearTimeout(id);
-  }, [query, genre, demographic, publicationType, tab, page]);
+    let active = true;
+    const id = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const data = await publicApi.getCatalog({
+          limit: SERIES_PER_PAGE,
+          offset: page * SERIES_PER_PAGE,
+          q: query,
+          genre,
+          demographic,
+          publicationType,
+          status: tab,
+        });
+        if (!active) return;
+        setSeries(data.items || []);
+        setTotal(data.total || 0);
+        setError("");
+      } catch (requestError) {
+        if (active) setError(requestError.message);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      active = false;
+      clearTimeout(id);
+    };
+  }, [query, genre, demographic, publicationType, tab, page, catalogRevision]);
   useEffect(() => {
     publicApi
       .getOpenVotePeriods()
@@ -121,8 +127,10 @@ function App() {
       const data = await publicApi.getChapterPages(id);
       setReader(data);
       document.body.classList.add("locked");
+      return true;
     } catch (e) {
       setError(e.message);
+      return false;
     }
   };
   const close = () => {
@@ -297,7 +305,7 @@ function App() {
           {error && (
             <div className="alert">
               {error}
-              <button onClick={loadSeries}>Thử lại</button>
+              <button onClick={() => setCatalogRevision((value) => value + 1)}>Thử lại</button>
             </div>
           )}
           <div className="series-grid">
@@ -468,6 +476,28 @@ function SeriesModal({ detail, close, read }) {
   );
 }
 function Reader({ reader, close, go }) {
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshAttempted, setRefreshAttempted] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
+
+  useEffect(() => {
+    setRefreshing(false);
+    setRefreshAttempted(false);
+    setRefreshError("");
+  }, [reader.chapter.id]);
+
+  const refreshExpiredUrls = async () => {
+    if (refreshing || refreshAttempted) return;
+    setRefreshing(true);
+    setRefreshAttempted(true);
+    setRefreshError("");
+    const refreshed = await go(reader.chapter.id);
+    if (!refreshed) {
+      setRefreshError("Không thể làm mới ảnh chương. Vui lòng thử lại.");
+    }
+    setRefreshing(false);
+  };
+
   return (
     <div className="reader">
       <div className="reader-bar">
@@ -475,9 +505,14 @@ function Reader({ reader, close, go }) {
         <p>
           {reader.series.title} <span>/ Ch.{reader.chapter.chapterNumber}</span>
         </p>
-        <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
-          ↑ Đầu trang
-        </button>
+        <div className="reader-actions">
+          <button onClick={refreshExpiredUrls} disabled={refreshing}>
+            {refreshing ? "Đang làm mới…" : "Làm mới ảnh"}
+          </button>
+          <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
+            ↑ Đầu trang
+          </button>
+        </div>
       </div>
       <div className="reader-progress"><span>Đọc trọn chương</span><b>{reader.pages.length} trang</b></div>
       <div className="pages">
@@ -486,9 +521,11 @@ function Reader({ reader, close, go }) {
             key={p.pageNumber}
             src={p.imageUrl}
             alt={`Trang ${p.pageNumber}`}
+            onError={refreshExpiredUrls}
           />
         ))}
       </div>
+      {refreshError && <p className="reader-refresh-error">{refreshError}</p>}
       <div className="reader-nav">
         <button
           disabled={!reader.prevChapterId}
@@ -509,6 +546,16 @@ function Reader({ reader, close, go }) {
 function VotePage({ close }) {
   const [reader, setReader] = useState(null);
   const [readerError, setReaderError] = useState("");
+  const loadVoteReader = async (chapterId) => {
+    try {
+      setReaderError("");
+      setReader(await publicApi.getChapterPages(chapterId));
+      return true;
+    } catch (error) {
+      setReaderError(error.message || "Không thể mở chương truyện này.");
+      return false;
+    }
+  };
   const openLatestChapter = async (seriesId) => {
     try {
       setReaderError("");
@@ -518,12 +565,12 @@ function VotePage({ close }) {
         setReaderError("Series này chưa có chương đã xuất bản để đọc.");
         return;
       }
-      setReader(await publicApi.getChapterPages(latestChapter.id));
+      await loadVoteReader(latestChapter.id);
     } catch (error) {
       setReaderError(error.message || "Không thể mở chương truyện này.");
     }
   };
-  if (reader) return <Reader reader={reader} close={() => setReader(null)} go={async (chapterId) => setReader(await publicApi.getChapterPages(chapterId))} />;
+  if (reader) return <Reader reader={reader} close={() => setReader(null)} go={loadVoteReader} />;
   return (
     <div className="vote-page">
       <header>

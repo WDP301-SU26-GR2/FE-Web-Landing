@@ -70,3 +70,23 @@ it("rejects ranking requests without a magazine or publication type", () => {
     }),
   ).toBe(false);
 });
+
+it("rejects ranking dates that cannot satisfy the API schema", () => {
+  expect(
+    isRankingSelectionComplete({
+      magazine: "Kirameki",
+      publicationType: "WEEKLY",
+      level: "YEAR",
+      year: "not-a-year",
+    }),
+  ).toBe(false);
+  expect(
+    isRankingSelectionComplete({
+      magazine: "Kirameki",
+      publicationType: "WEEKLY",
+      level: "MONTH",
+      year: 2026,
+      month: 13,
+    }),
+  ).toBe(false);
+});
