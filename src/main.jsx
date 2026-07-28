@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import { publicApi } from "./api/public.service";
+import { RankingPanel } from "./components/RankingPanel";
 import { VotePanel } from "./components/VotePanel";
 
 const SERIES_PER_PAGE = 8;
@@ -58,11 +59,7 @@ function App() {
     [publicationType, setPublicationType] = useState(""),
     [tab, setTab] = useState(""),
     [page, setPage] = useState(0);
-  const [ranking, setRanking] = useState({ period: null, results: [] }),
-    [rankingPeriods, setRankingPeriods] = useState([]),
-    [rankingPeriodId, setRankingPeriodId] = useState(""),
-    [rankingType, setRankingType] = useState(""),
-    [hasOpenVotePeriod, setHasOpenVotePeriod] = useState(false),
+  const [hasOpenVotePeriod, setHasOpenVotePeriod] = useState(false),
     [reader, setReader] = useState(null),
     [detail, setDetail] = useState(null),
     [voteRoute, setVoteRoute] = useState(() => window.location.hash === "#vote");
@@ -139,6 +136,7 @@ function App() {
   const closeVotePage = () => {
     window.location.hash = "top";
   };
+  const magazines = [...new Set(series.map((item) => item.magazine).filter(Boolean))];
   if (voteRoute) return <VotePage close={closeVotePage} />;
   return (
     <>
@@ -176,7 +174,7 @@ function App() {
             </div>
             <div className="hero-proof" aria-label="Thông tin thư viện">
               <div><strong>{total || "—"}</strong><span>series đang mở</span></div>
-              <div><strong>{ranking.results?.length || "—"}</strong><span>tác phẩm xếp hạng</span></div>
+              <div><strong>TOP</strong><span>bảng xếp hạng công khai</span></div>
               <div className={hasOpenVotePeriod ? "live" : ""}><strong>{hasOpenVotePeriod ? "LIVE" : "SOON"}</strong><span>{hasOpenVotePeriod ? "kỳ bình chọn đang mở" : "đón kỳ bình chọn mới"}</span></div>
             </div>
           </div>
@@ -401,56 +399,7 @@ function App() {
               Tham gia bình chọn <b>→</b>
             </button>
           </div>
-          <div className="rank-list">
-            <div className="rank-head">
-              <span>XẾP HẠNG MỚI NHẤT</span>
-              <small>
-                {ranking.period
-                  ? `Kỳ ${ranking.period.reflectedIssueNumber || ranking.period.issueNumber || ""}`
-                  : "Đang cập nhật"}
-              </small>
-            </div>
-            <div className="ranking-filters">
-              <select value={rankingPeriodId} onChange={(e) => setRankingPeriodId(e.target.value)}>
-                <option value="">Kỳ mới nhất</option>
-                {rankingPeriods.map((period) => (
-                  <option key={period.id} value={period.id}>
-                    Kỳ #{period.reflectedIssueNumber || period.issueNumber || period.id}
-                  </option>
-                ))}
-              </select>
-              <select value={rankingType} onChange={(e) => setRankingType(e.target.value)}>
-                <option value="">Tất cả tạp chí</option>
-                <option value="WEEKLY">Tuần</option>
-                <option value="MONTHLY">Tháng</option>
-                <option value="IRREGULAR">Không định kỳ</option>
-              </select>
-            </div>
-            {ranking.results?.slice(0, 5).map((r, i) => (
-              <div className={`rank-row rank-${i + 1}`} key={r.seriesId}>
-                <strong>0{i + 1}</strong>
-                <div>
-                  <h3>{r.seriesTitle || "Series không còn hiển thị"}</h3>
-                  <p>
-                    {r.publicationType || "SERIES"} ·{" "}
-                    {Math.round(r.voteCount || 0)} lượt bình chọn
-                  </p>
-                </div>
-                <span
-                  className={
-                    r.rankChange > 0 ? "up" : r.rankChange < 0 ? "down" : ""
-                  }
-                >
-                  {r.rankChange
-                    ? `${r.rankChange > 0 ? "↑" : "↓"} ${Math.abs(r.rankChange)}`
-                    : "—"}
-                </span>
-              </div>
-            ))}
-            {!ranking.results?.length && (
-              <p className="empty dark">Chưa có bảng xếp hạng đã công bố.</p>
-            )}
-          </div>
+          <RankingPanel magazines={magazines} />
         </section>
       </main>
       <footer>

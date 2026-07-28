@@ -51,3 +51,22 @@ it("formats cooldown time and requires a month only for monthly rankings", () =>
     }),
   ).toBe(true);
 });
+
+it("rejects ranking requests without a magazine or publication type", () => {
+  expect(
+    isRankingSelectionComplete({
+      magazine: "",
+      publicationType: "WEEKLY",
+      level: "YEAR",
+      year: 2026,
+    }),
+  ).toBe(false);
+  expect(
+    isRankingSelectionComplete({
+      magazine: "Kirameki",
+      publicationType: "",
+      level: "YEAR",
+      year: 2026,
+    }),
+  ).toBe(false);
+});
