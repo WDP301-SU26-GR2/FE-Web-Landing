@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import { publicApi } from "./api/public.service";
+import { VotePanel } from "./components/VotePanel";
 
 const SERIES_PER_PAGE = 8;
 const VOTE_SERIES_PER_PAGE = 8;
@@ -61,10 +62,9 @@ function App() {
     [rankingPeriods, setRankingPeriods] = useState([]),
     [rankingPeriodId, setRankingPeriodId] = useState(""),
     [rankingType, setRankingType] = useState(""),
-    [voteContext, setVoteContext] = useState(null),
+    [hasOpenVotePeriod, setHasOpenVotePeriod] = useState(false),
     [reader, setReader] = useState(null),
     [detail, setDetail] = useState(null),
-    [voteOpen, setVoteOpen] = useState(false),
     [voteRoute, setVoteRoute] = useState(() => window.location.hash === "#vote");
   const loadSeries = async () => {
     setLoading(true);
@@ -92,15 +92,10 @@ function App() {
     return () => clearTimeout(id);
   }, [query, genre, demographic, publicationType, tab, page]);
   useEffect(() => {
-    Promise.all([publicApi.getLatestRankingResults(), publicApi.getVotePeriods()])
-      .then(([latest, periods]) => {
-        setRanking(latest);
-        setRankingPeriods(periods.items || periods || []);
-      })
-      .catch(() => {});
-  }, []);
-  useEffect(() => {
-    publicApi.getVoteContext().then(setVoteContext).catch(() => setVoteContext(null));
+    publicApi
+      .getOpenVotePeriods()
+      .then((data) => setHasOpenVotePeriod(Boolean(data.items?.length)))
+      .catch(() => setHasOpenVotePeriod(false));
   }, []);
   useEffect(() => {
     const syncRoute = () => setVoteRoute(window.location.hash === "#vote");
@@ -115,12 +110,6 @@ function App() {
     setTab("");
     setPage(0);
   };
-  useEffect(() => {
-    const loadRanking = rankingPeriodId
-      ? publicApi.getRankingResults(rankingPeriodId, rankingType || undefined)
-      : publicApi.getLatestRankingResults(rankingType || undefined);
-    loadRanking.then(setRanking).catch(() => {});
-  }, [rankingPeriodId, rankingType]);
   const openDetail = async (id) => {
     try {
       const data = await publicApi.getSeriesDetail(id);
@@ -142,7 +131,6 @@ function App() {
   const close = () => {
     setReader(null);
     setDetail(null);
-    setVoteOpen(false);
     document.body.classList.remove("locked");
   };
   const openVotePage = () => {
@@ -189,7 +177,7 @@ function App() {
             <div className="hero-proof" aria-label="Thông tin thư viện">
               <div><strong>{total || "—"}</strong><span>series đang mở</span></div>
               <div><strong>{ranking.results?.length || "—"}</strong><span>tác phẩm xếp hạng</span></div>
-              <div className={voteContext?.period ? "live" : ""}><strong>{voteContext?.period ? "LIVE" : "SOON"}</strong><span>{voteContext?.period ? "kỳ bình chọn đang mở" : "đón kỳ bình chọn mới"}</span></div>
+              <div className={hasOpenVotePeriod ? "live" : ""}><strong>{hasOpenVotePeriod ? "LIVE" : "SOON"}</strong><span>{hasOpenVotePeriod ? "kỳ bình chọn đang mở" : "đón kỳ bình chọn mới"}</span></div>
             </div>
           </div>
           <div className="hero-art">
@@ -476,7 +464,6 @@ function App() {
         <SeriesModal detail={detail} close={close} read={openReader} />
       )}{" "}
       {reader && <Reader reader={reader} close={close} go={openReader} />}{" "}
-      {voteOpen && <VoteModal close={close} />}
     </>
   );
 }
@@ -602,7 +589,9 @@ function VotePage({ close }) {
           <h1>Phiếu bầu của bạn,<br /><i>ngôi sao tiếp theo.</i></h1>
           <p>Khám phá các series đang tranh tài, chọn câu chuyện bạn muốn nhìn thấy ở kỳ phát hành tiếp theo.</p>
         </div>
-        <VoteModal close={close} standalone onRead={openLatestChapter} readError={readerError} />
+        <div className="modal vote-modal vote-page-card">
+          <VotePanel onRead={openLatestChapter} readError={readerError} />
+        </div>
       </main>
     </div>
   );
