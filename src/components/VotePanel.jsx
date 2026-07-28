@@ -195,6 +195,9 @@ export function VotePanel({ onRead, readError }) {
   const selectedPeriod = openPeriods.find(
     (period) => period.id === selectedPeriodId,
   );
+  const hasOpenMonthlyPeriod = openPeriods.some(
+    (period) => period.publicationType === "MONTHLY",
+  );
   const filteredSeries = useMemo(() => {
     const normalizedQuery = voteQuery.trim().toLowerCase();
     return (context?.series || []).filter((series) =>
@@ -328,6 +331,11 @@ export function VotePanel({ onRead, readError }) {
           </button>
         ))}
       </div>
+      {!hasOpenMonthlyPeriod && (
+        <p className="vote-period-note">
+          Kỳ bình chọn Hàng tháng chưa được mở. Series Monthly sẽ xuất hiện ở đây ngay khi Editor mở kỳ.
+        </p>
+      )}
 
       {openPeriodsError && <p className="vote-notice">{openPeriodsError}</p>}
       {!IS_RECAPTCHA_CONFIGURED && (

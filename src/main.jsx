@@ -42,8 +42,8 @@ const status = (value) =>
   ({
     SERIALIZED: "Đang ra mắt",
     HIATUS: "Tạm nghỉ",
-    COMPLETING: "Sắp hoàn thành",
-    CANCELLING: "Sắp kết thúc",
+    COMPLETING: "Đang hoàn tất",
+    CANCELLING: "Đang bị hủy",
     COMPLETED: "Hoàn thành",
     CANCELLED: "Đã hủy",
   })[value] || value;
@@ -249,8 +249,8 @@ function App() {
                 ["", "Tất cả"],
                 ["SERIALIZED", "Đang phát hành"],
                 ["HIATUS", "Tạm nghỉ"],
-                ["COMPLETING", "Sắp hoàn thành"],
-                ["CANCELLING", "Sắp kết thúc"],
+                ["COMPLETING", "Kết thúc tự nhiên"],
+                ["CANCELLING", "Đang bị hủy"],
                 ["COMPLETED", "Đã hoàn thành"],
                 ["CANCELLED", "Đã hủy"],
               ].map(([key, label]) => (
