@@ -78,6 +78,7 @@ Query:
 | `demographic` | tuỳ | enum `Demographic` | |
 | `publicationType` | tuỳ | enum `PublicationType` | |
 | `status` | tuỳ | subset `SeriesStatus` | **chỉ nhận** `SERIALIZED`·`HIATUS`·`COMPLETING`·`CANCELLING`·`COMPLETED`·`CANCELLED` (mọi trạng thái pre-serialization như `DRAFT`/`IN_REVIEW`/`PITCHED` gửi lên → 422, vì route không expose chúng ra public). Omit = trả toàn bộ tập public (6 status trên) |
+| `statusGroup` | tuỳ | literal `ACTIVE` | Gom series vẫn đang phát hành: `SERIALIZED` + `COMPLETING` + `CANCELLING`. **Không gửi đồng thời** với `status` (gửi cả hai → 422). Dùng cho tab “Đang phát hành”. |
 | `limit` | tuỳ | int | default 20, **tối đa 50** — ⚠️ khác quy ước chung "tối đa 100" ở file 01 §2, route này tự giới hạn thấp hơn |
 | `offset` | tuỳ | int | default 0 |
 

@@ -61,6 +61,22 @@ describe("public API contracts", () => {
     ]);
   });
 
+  it("uses only documented statuses for the active catalog group", async () => {
+    const fetch = stubSuccess({ items: [] });
+
+    await Promise.all(
+      ["SERIALIZED", "COMPLETING", "CANCELLING"].map((status) =>
+        publicApi.getCatalog({ status, limit: 50, offset: 0 }),
+      ),
+    );
+
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      expect.stringMatching(/\/public\/series\?status=SERIALIZED&limit=50&offset=0$/),
+      expect.stringMatching(/\/public\/series\?status=COMPLETING&limit=50&offset=0$/),
+      expect.stringMatching(/\/public\/series\?status=CANCELLING&limit=50&offset=0$/),
+    ]);
+  });
+
   it("sends the strict public OTP and ballot bodies", async () => {
     const fetch = stubSuccess({});
     const ballot = {

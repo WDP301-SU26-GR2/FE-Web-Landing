@@ -7,6 +7,7 @@ import { VotePanel } from "./components/VotePanel";
 
 const SERIES_PER_PAGE = 8;
 const VOTE_SERIES_PER_PAGE = 8;
+const ACTIVE_CATALOG_STATUSES = ["SERIALIZED", "COMPLETING", "CANCELLING"];
 const LOGO_URL =
   "https://res.cloudinary.com/dbsbfvz2f/image/upload/f_auto,q_auto/Gemini_Generated_Image_d713d4d713d4d713_hlbjvd.png";
 const SYSTEM_NAME = "Manga Creation Workflow and Publishing Management System";
@@ -40,13 +41,50 @@ const formatDate = (date) =>
     : "Đang cập nhật";
 const status = (value) =>
   ({
-    SERIALIZED: "Đang ra mắt",
+    SERIALIZED: "Đang phát hành",
     HIATUS: "Tạm nghỉ",
-    COMPLETING: "Đang hoàn tất",
-    CANCELLING: "Đang bị hủy",
-    COMPLETED: "Hoàn thành",
+    COMPLETING: "Sắp kết thúc",
+    CANCELLING: "Sắp bị hủy",
+    COMPLETED: "Đã kết thúc",
     CANCELLED: "Đã hủy",
   })[value] || value;
+
+async function getAllCatalogItems(filters, status) {
+  const firstPage = await publicApi.getCatalog({
+    ...filters,
+    status,
+    limit: 50,
+    offset: 0,
+  });
+  const items = [...(firstPage.items || [])];
+
+  for (let offset = 50; offset < (firstPage.total || 0); offset += 50) {
+    const nextPage = await publicApi.getCatalog({
+      ...filters,
+      status,
+      limit: 50,
+      offset,
+    });
+    items.push(...(nextPage.items || []));
+  }
+
+  return items;
+}
+
+async function getActiveCatalog(filters, page) {
+  const groups = await Promise.all(
+    ACTIVE_CATALOG_STATUSES.map((status) => getAllCatalogItems(filters, status)),
+  );
+  const items = groups
+    .flat()
+    .sort((left, right) => left.title.localeCompare(right.title, "vi"));
+  const offset = page * SERIES_PER_PAGE;
+
+  return {
+    items: items.slice(offset, offset + SERIES_PER_PAGE),
+    total: items.length,
+  };
+}
 
 function App() {
   const [series, setSeries] = useState([]),
@@ -69,15 +107,21 @@ function App() {
     const id = setTimeout(async () => {
       setLoading(true);
       try {
-        const data = await publicApi.getCatalog({
-          limit: SERIES_PER_PAGE,
-          offset: page * SERIES_PER_PAGE,
+        const filters = {
           q: query,
           genre,
           demographic,
           publicationType,
-          status: tab,
-        });
+        };
+        const data =
+          tab === "ACTIVE"
+            ? await getActiveCatalog(filters, page)
+            : await publicApi.getCatalog({
+                ...filters,
+                limit: SERIES_PER_PAGE,
+                offset: page * SERIES_PER_PAGE,
+                status: tab,
+              });
         if (!active) return;
         setSeries(data.items || []);
         setTotal(data.total || 0);
@@ -247,11 +291,9 @@ function App() {
             <div className="tabs">
               {[
                 ["", "Tất cả"],
-                ["SERIALIZED", "Đang phát hành"],
+                ["ACTIVE", "Đang phát hành"],
                 ["HIATUS", "Tạm nghỉ"],
-                ["COMPLETING", "Kết thúc tự nhiên"],
-                ["CANCELLING", "Đang bị hủy"],
-                ["COMPLETED", "Đã hoàn thành"],
+                ["COMPLETED", "Đã kết thúc"],
                 ["CANCELLED", "Đã hủy"],
               ].map(([key, label]) => (
                 <button
