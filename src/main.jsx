@@ -380,6 +380,11 @@ function App() {
                           {item.publishedChapterCount} chương
                         </p>
                         <h3>{item.title}</h3>
+                        {item.author?.displayName && (
+                          <p className="series-author">
+                            Tác giả: {item.author.displayName}
+                          </p>
+                        )}
                       </div>
                       <button
                         className="round"
@@ -491,7 +496,9 @@ function SeriesModal({ detail, close, read }) {
           <h2>{detail.title}</h2>
           <div className="detail-stats">
             <span>{detail.chapters?.length || 0} chương đã phát hành</span>
-            <span>{detail.mangaka?.displayName || detail.mangakaName || "Tác giả Kirameki"}</span>
+            {detail.author?.displayName && (
+              <span>Tác giả: {detail.author.displayName}</span>
+            )}
           </div>
           <div className="tags">
             {detail.genres?.map((g) => (
