@@ -7,7 +7,7 @@ import { VotePanel } from "./components/VotePanel";
 
 const SERIES_PER_PAGE = 8;
 const VOTE_SERIES_PER_PAGE = 8;
-const ACTIVE_CATALOG_STATUSES = ["SERIALIZED", "COMPLETING", "CANCELLING"];
+const ACTIVE_SERIES_STATUSES = ["SERIALIZED", "COMPLETING", "CANCELLING"];
 const LOGO_URL =
   "https://res.cloudinary.com/dbsbfvz2f/image/upload/f_auto,q_auto/Gemini_Generated_Image_d713d4d713d4d713_hlbjvd.png";
 const SYSTEM_NAME = "Manga Creation Workflow and Publishing Management System";
@@ -49,43 +49,17 @@ const status = (value) =>
     CANCELLED: "Đã hủy",
   })[value] || value;
 
-async function getAllCatalogItems(filters, status) {
-  const firstPage = await publicApi.getCatalog({
-    ...filters,
-    status,
-    limit: 50,
-    offset: 0,
-  });
-  const items = [...(firstPage.items || [])];
-
-  for (let offset = 50; offset < (firstPage.total || 0); offset += 50) {
-    const nextPage = await publicApi.getCatalog({
-      ...filters,
-      status,
-      limit: 50,
-      offset,
-    });
-    items.push(...(nextPage.items || []));
-  }
-
-  return items;
-}
-
 async function getActiveCatalog(filters, page) {
   const groups = await Promise.all(
-    ACTIVE_CATALOG_STATUSES.map((status) =>
-      getAllCatalogItems(filters, status),
+    ACTIVE_SERIES_STATUSES.map((status) =>
+      publicApi.getCatalog({ ...filters, status, limit: SERIES_PER_PAGE, offset: page * SERIES_PER_PAGE }),
     ),
   );
   const items = groups
-    .flat()
+    .flatMap((page) => page.items || [])
     .sort((left, right) => left.title.localeCompare(right.title, "vi"));
-  const offset = page * SERIES_PER_PAGE;
-
-  return {
-    items: items.slice(offset, offset + SERIES_PER_PAGE),
-    total: items.length,
-  };
+  const total = items.length;
+  return { items: items.slice(0, SERIES_PER_PAGE), total };
 }
 
 function App() {

@@ -61,19 +61,19 @@ describe("public API contracts", () => {
     ]);
   });
 
-  it("uses only documented statuses for the active catalog group", async () => {
+  it("uses status filter per active status type for the active catalog", async () => {
     const fetch = stubSuccess({ items: [] });
 
     await Promise.all(
       ["SERIALIZED", "COMPLETING", "CANCELLING"].map((status) =>
-        publicApi.getCatalog({ status, limit: 50, offset: 0 }),
+        publicApi.getCatalog({ status, limit: 8, offset: 0 }),
       ),
     );
 
     expect(fetch.mock.calls.map(([url]) => url)).toEqual([
-      expect.stringMatching(/\/public\/series\?status=SERIALIZED&limit=50&offset=0$/),
-      expect.stringMatching(/\/public\/series\?status=COMPLETING&limit=50&offset=0$/),
-      expect.stringMatching(/\/public\/series\?status=CANCELLING&limit=50&offset=0$/),
+      expect.stringMatching(/\/public\/series\?status=SERIALIZED&limit=8&offset=0$/),
+      expect.stringMatching(/\/public\/series\?status=COMPLETING&limit=8&offset=0$/),
+      expect.stringMatching(/\/public\/series\?status=CANCELLING&limit=8&offset=0$/),
     ]);
   });
 
