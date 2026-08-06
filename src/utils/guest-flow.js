@@ -4,10 +4,26 @@ const publicationTypeLabels = {
   IRREGULAR: "Không định kỳ",
 };
 
+// Lấy tên tạp chí từ kỳ vote đang mở (dùng cho VotePanel pre-select khi Guest bấm từ màn vote sang
+// màn ranking, vd link "Xem bảng xếp hạng của kỳ này"). Đây là nguồn phụ — nguồn chính cho dropdown
+// tạp chí trên Landing là GET /public/magazines (xem RankingPanel.jsx).
 export function getMagazineOptions(openPeriods = []) {
   return [...new Set(
     openPeriods
       .map((period) => period.magazine?.trim())
+      .filter(Boolean),
+  )].sort((left, right) => left.localeCompare(right));
+}
+
+// Tên tạp chí trong dropdown Ranking, lấy từ response của GET /public/magazines (Spec 15 §2.4).
+// Map [{name, publicationTypes}] → string[] chỉ chứa tên (component RankingPanel xử lý publicationTypes
+// qua field publicationType riêng). Tương tự getMagazineOptions: trim, bỏ rỗng, sort localeCompare,
+// và Set để chống trùng khi cùng tên xuất hiện nhiều lần trong catalog.
+export function listMagazineNames(catalog = []) {
+  if (!Array.isArray(catalog)) return [];
+  return [...new Set(
+    catalog
+      .map((entry) => entry?.name?.trim())
       .filter(Boolean),
   )].sort((left, right) => left.localeCompare(right));
 }

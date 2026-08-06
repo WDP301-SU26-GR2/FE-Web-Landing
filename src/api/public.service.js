@@ -11,6 +11,9 @@ export const publicApi = {
   /** GET /public/chapters/:id/pages — read chapter pages */
   getChapterPages: (chapterId) => request(`/public/chapters/${chapterId}/pages`),
 
+  /** GET /public/magazines — public danh mục tạp chí (Spec 15 §2.4) cho Landing GUEST dựng dropdown */
+  getMagazines: () => request("/public/magazines"),
+
   /** GET /vote/periods/open — entry point of vote flow; returns array of OPEN periods */
   getOpenVotePeriods: (filters) =>
     request(`/vote/periods/open${toQueryString(filters)}`),

@@ -4,6 +4,7 @@ import {
   formatVotePeriod,
   getMagazineOptions,
   isRankingSelectionComplete,
+  listMagazineNames,
   toggleSeriesSelection,
 } from "./guest-flow";
 
@@ -15,6 +16,24 @@ it("returns every unique magazine from open Guest vote periods", () => {
       { magazine: " AuraNVC " },
     ]),
   ).toEqual(["AuraNVC", "Ko có"]);
+});
+
+it("maps the public magazine catalog to sorted unique names", () => {
+  expect(
+    listMagazineNames([
+      { name: "Jump", publicationTypes: ["WEEKLY"] },
+      { name: " Monthly Mag ", publicationTypes: ["MONTHLY"] },
+      { name: "Jump", publicationTypes: ["WEEKLY"] },
+      { name: "", publicationTypes: ["WEEKLY"] },
+      { name: null, publicationTypes: ["WEEKLY"] },
+    ]),
+  ).toEqual(["Jump", "Monthly Mag"]);
+});
+
+it("returns an empty list when the magazine catalog is missing or empty", () => {
+  expect(listMagazineNames([])).toEqual([]);
+  expect(listMagazineNames(undefined)).toEqual([]);
+  expect(listMagazineNames(null)).toEqual([]);
 });
 
 describe("toggleSeriesSelection", () => {

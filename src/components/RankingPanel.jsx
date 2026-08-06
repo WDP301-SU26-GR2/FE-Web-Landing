@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { publicApi } from "../api/public.service";
-import { getMagazineOptions, isRankingSelectionComplete } from "../utils/guest-flow";
+import { isRankingSelectionComplete, listMagazineNames } from "../utils/guest-flow";
 
 const publicationTypes = [
   ["WEEKLY", "Hàng tuần"],
@@ -14,8 +14,12 @@ function rankChange(change) {
 }
 
 export function RankingPanel({ openVotePeriods }) {
-  const magazinesLoading = openVotePeriods === null;
-  const magazines = getMagazineOptions(openVotePeriods || []);
+  // openVotePeriods được truyền xuống để VotePanel có thể "pre-select" tạp chí khi Guest bấm từ
+  // màn vote (UX), nhưng KHÔNG dùng để dựng dropdown tạp chí — dropdown dựng từ GET /public/magazines
+  // (Spec 15 §2.4). Trước đây code gọi getMagazineOptions(openPeriods) là HACK: chỉ thấy tạp chí đang
+  // mở kỳ vote, không thấy tạp chí đã REFLECTED → Guest xem ranking lịch sử bị dropdown rỗng.
+  const [magazines, setMagazines] = useState([]);
+  const [magazinesLoading, setMagazinesLoading] = useState(true);
   const [magazine, setMagazine] = useState("");
   const [publicationType, setPublicationType] = useState("");
   const [ranking, setRanking] = useState({ period: null, results: [] });
@@ -30,6 +34,35 @@ export function RankingPanel({ openVotePeriods }) {
   const [error, setError] = useState("");
   const [aggregateError, setAggregateError] = useState("");
   const [rankingRetryAfter, setRankingRetryAfter] = useState(0);
+
+  // Tải danh mục tạp chí public 1 lần khi mount. Route /public/magazines cache 120s ở BE nên rẻ.
+  useEffect(() => {
+    let active = true;
+    setMagazinesLoading(true);
+    publicApi
+      .getMagazines()
+      .then((result) => {
+        if (!active) return;
+        setMagazines(listMagazineNames(result.items || []));
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setMagazines([]);
+        setError(requestError.message);
+      })
+      .finally(() => active && setMagazinesLoading(false));
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Khi VotePanel truyền xuống openPeriods, nếu chưa chọn magazine thì pre-select tạp chí của kỳ đang mở.
+  useEffect(() => {
+    if (magazine || !Array.isArray(openVotePeriods) || openVotePeriods.length === 0) return;
+    const fromOpenPeriod = openVotePeriods[0]?.magazine?.trim();
+    if (fromOpenPeriod && magazines.includes(fromOpenPeriod)) setMagazine(fromOpenPeriod);
+  }, [openVotePeriods, magazines, magazine]);
 
   useEffect(() => {
     if (!magazine && magazines[0]) setMagazine(magazines[0]);
@@ -150,7 +183,7 @@ export function RankingPanel({ openVotePeriods }) {
               disabled={magazinesLoading || !magazines.length}
             >
               <option value="">
-                {magazinesLoading ? "Đang tải tạp chí..." : "Chọn tạp chí"}
+                {magazinesLoading ? "Đang tải tạp chí..." : magazines.length ? "Chọn tạp chí" : "Chưa có tạp chí"}
               </option>
               {magazines.map((item) => (
                 <option key={item} value={item}>

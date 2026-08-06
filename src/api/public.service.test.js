@@ -27,6 +27,21 @@ describe("public API contracts", () => {
     ]);
   });
 
+  it("loads the public magazine catalog without query parameters", async () => {
+    const fetch = stubSuccess({
+      items: [{ name: "Jump", publicationTypes: ["WEEKLY"] }],
+    });
+
+    const result = await publicApi.getMagazines();
+
+    expect(result).toEqual({
+      items: [{ name: "Jump", publicationTypes: ["WEEKLY"] }],
+    });
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      expect.stringMatching(/\/public\/magazines$/),
+    ]);
+  });
+
   it("sends only documented ranking query parameters", async () => {
     const fetch = stubSuccess({ items: [] });
 
