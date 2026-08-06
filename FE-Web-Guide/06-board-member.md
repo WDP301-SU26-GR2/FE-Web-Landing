@@ -1,14 +1,16 @@
 # §06 — BOARD_MEMBER (Thành viên Hội đồng Biên tập)
 
-> **Nguồn:** đọc trực tiếp `BE-dev/src/modules/board/*` (controller/gateway/services/schemas/errors — trọng tâm), `BE-dev/src/modules/contract/*` (contract + amendment + payment-condition controller), `BE-dev/src/modules/payment/*`, `BE-dev/src/modules/reprint/*`, `BE-dev/src/modules/transfer/*`, `BE-dev/src/modules/deadline/*`, `BE-dev/src/modules/series/*`, `BE-dev/src/modules/tankobon/*`, `BE-dev/src/modules/survey/*`, `BE-dev/src/modules/publication/*`, `BE-dev/src/modules/audit/*`, `BE-dev/src/modules/users/*`, `BE-dev/src/modules/chapter/*`, `BE-dev/src/modules/name/*`, `BE-dev/src/modules/revision/*`, `BE-dev/src/modules/task/*`, đối chiếu quyền route với `BE-dev/test/flows/route-roles.ts`. Ngày dựng: 2026-07-27.
+> 🔴 **2026-08-06 — xem [`08-spec-2026-08-06-magazines-decisions-flows.md`](08-spec-2026-08-06-magazines-decisions-flows.md) (có FLOW ③ phiên họp chi tiết):** `DecisionType` còn **8 giá trị** (bỏ `CONTINUE`/`CANCEL`/`HIATUS`/`ENDING_ALLOWANCE`; "giữ bộ truyện" = mở `CANCELLATION` rồi vote **REJECT**); `POST /board/decisions` siết gate (1 series = 1 quyết định mở); báo cáo trùng → 409 `BoardReportAlreadyExists`; `reportType` text tự do.
+>
+> **Nguồn:** đọc trực tiếp `BE-dev/src/modules/board/*` (controller/gateway/services/schemas/errors — trọng tâm), `BE-dev/src/modules/contract/*` (contract + amendment + payment-condition controller), `BE-dev/src/modules/payment/*`, `BE-dev/src/modules/reprint/*`, `BE-dev/src/modules/transfer/*`, `BE-dev/src/modules/deadline/*`, `BE-dev/src/modules/series/*`, `BE-dev/src/modules/tankobon/*`, `BE-dev/src/modules/survey/*`, `BE-dev/src/modules/publication/*`, `BE-dev/src/modules/audit/*`, `BE-dev/src/modules/users/*`, `BE-dev/src/modules/chapter/*`, `BE-dev/src/modules/storyboard/*`, `BE-dev/src/modules/revision/*`, `BE-dev/src/modules/task/*`, đối chiếu quyền route với `BE-dev/test/flows/route-roles.ts`. Ngày dựng: 2026-07-27; cập nhật Spec 28: 2026-08-01; §87 contract 2-phase: 2026-08-02.
 > Đọc trước [`00-INDEX.md`](00-INDEX.md) (mục lục) và **bắt buộc** [`01-conventions-and-auth.md`](01-conventions-and-auth.md) (envelope, lỗi, phân trang, upload R2, enum §7, `GET/PATCH /me`) — file này KHÔNG lặp lại các quy ước đó.
 > Enum ghi dạng `enum X` → tra giá trị đầy đủ ở `01-conventions-and-auth.md` §7.
 
 ---
 
-## 0. Tổng quan phạm vi — 76 route độc quyền BOARD_MEMBER
+## 0. Tổng quan phạm vi — 80 route độc quyền BOARD_MEMBER
 
-Đối chiếu `test/flows/route-roles.ts` (sinh tự động từ Reflect metadata runtime — nguồn sự thật duy nhất về quyền): BOARD_MEMBER có đúng **76 route** trong `allowed[]`. Không suy đoán từ brief ban đầu — đã grep lại toàn bộ file và khớp đủ 76.
+Đối chiếu `test/flows/route-roles.ts` (sinh tự động từ Reflect metadata runtime — nguồn sự thật duy nhất về quyền): BOARD_MEMBER có đúng **80 route** trong `allowed[]` sau Spec 30/31 (78 + 2 route đọc `GET /series-requests` và `GET /series-requests/:id` — Hội đồng theo dõi yêu cầu của tác giả, KHÔNG duyệt: duyệt là việc của biên tập viên phụ trách). Hai route proposal-Name đã bị xoá; hai route chapter-Name được đổi sang Storyboard.
 
 | # | Method | Path | Nhóm |
 |---|---|---|---|
@@ -28,9 +30,9 @@
 | 14 | GET | `/contracts/:id/pdf` | §3 Contract |
 | 15 | GET | `/contracts/:id/versions` | §3 Contract |
 | 16 | GET | `/contracts/:id/versions/:versionId` | §3 Contract |
-| 17 | POST | `/contracts/:id/board-approve` | §3 Contract |
-| 18 | POST | `/contracts/:id/board-request-changes` | §3 Contract |
-| 19 | POST | `/contracts/:id/signatures/board` | §3 Contract |
+| 17 | GET/POST | `/contracts/:id/comments` | §3 Contract (🆕 §87 comment tư vấn) |
+| 18 | POST | `/contracts/:id/claim` · `/release` | §3 Contract (🆕 §87 nhận/nhả đại diện) |
+| 19 | POST | `/contracts/:id/sign-representative` | §3 Contract (🆕 §87 đại diện ký OTP) |
 | 20 | POST | `/contracts/:id/revenue` | §3 Contract |
 | 21 | GET | `/contracts/:id/status` | §3 Contract |
 | 22 | GET | `/contracts/:contractId/amendments` | §3 Contract |
@@ -52,6 +54,7 @@
 | 38 | GET | `/reprint-requests/:id/chapters/:chapterId` | §5 Reprint |
 | 39 | PATCH | `/reprint-requests/:id/chapters/:chapterId/assign-reviser` | §5 Reprint |
 | 40 | POST | `/transfers/contracts/:id/sign` | §5 Transfer |
+| 40b 🆕 | GET | `/transfers/contracts/:id` | §5 Transfer (Spec 27) |
 | 41 | GET | `/transfers/contracts/:id/signatures` | §5 Transfer |
 | 42 | GET | `/transfers/requests/:id` | §5 Transfer |
 | 43 | GET | `/transfers/requests/pending-board` | §5 Transfer |
@@ -64,8 +67,6 @@
 | 50 | GET | `/series` | §6 Series |
 | 51 | GET | `/series/:id` | §6 Series |
 | 52 | GET | `/series/:id/defense-dashboard` | §6 Series |
-| 53 | GET | `/series/:id/names` | §6 Series |
-| 54 | GET | `/series/:id/names/:nameId` | §6 Series |
 | 55 | GET | `/publication-versions/:id` | §6 Publication |
 | 56 | GET | `/series/:seriesId/publication-versions` | §6 Publication |
 | 57 | GET | `/survey-periods` | §6 Survey |
@@ -75,21 +76,22 @@
 | 61 | GET | `/survey-periods/:id/votes` | §6 Survey |
 | 62 | GET | `/rankings` | §6 Survey |
 | 63 | GET | `/rankings/board` | §6 Survey |
+| 63b 🆕 | GET | `/rankings/internal/aggregate` | §6 Survey (W1 — aggregate nội bộ giữ risk signal) |
 | 64 | GET | `/audit` | §6 Audit |
 | 65 | GET | `/assistants` | §6 Reference |
 | 66 | GET | `/mangakas` | §6 Reference |
 | 67 | GET | `/me/staff-profile` | §6 Reference |
 | 68 | PUT | `/me/staff-profile` | §6 Reference |
 | 69 | POST | `/tankobon-sales` | §6 Reference |
-| 70 | GET | `/chapters/:id/names` | §6 Production ref |
-| 71 | GET | `/chapters/:id/names/:nameId` | §6 Production ref |
+| 70 | GET | `/chapters/:id/storyboards` | §6 Production ref |
+| 71 | GET | `/storyboards/:id` | §6 Production ref |
 | 72 | GET | `/chapters/:id/pages` | §6 Production ref |
 | 73 | GET | `/chapters/:id/progress` | §6 Production ref |
 | 74 | GET | `/chapters/:id/stages` | §6 Production ref |
 | 75 | GET | `/revision-requests` | §6 Production ref |
 | 76 | POST | `/tasks/:id/download-url` | §6 Production ref |
 
-Ngoài 76 route này, Board còn dùng các route **AUTH** dùng chung mọi role (xem `01-conventions-and-auth.md` §5.8, §3, §4): `GET/PATCH /me`, `POST /uploads/sign` + `/sign-download`, `GET /notifications` + đánh dấu đã đọc, `GET /assistants/:userId`/`GET /mangakas/:userId`/`GET /staff/:userId` (xem hồ sơ công khai), `GET /chapters` + `GET /chapters/:id` (đọc chi tiết chapter — có manuscript/schedule).
+Ngoài 80 route này, Board còn dùng các route **AUTH** dùng chung mọi role (xem `01-conventions-and-auth.md` §5.8, §3, §4): `GET/PATCH /me`, `POST /uploads/sign` + `/sign-download`, `GET /notifications` + đánh dấu đã đọc, `GET /assistants/:userId`/`GET /mangakas/:userId`/`GET /staff/:userId` (xem hồ sơ công khai), `GET /chapters` + `GET /chapters/:id` (đọc chi tiết chapter — có manuscript/schedule).
 
 ⚠️ **Khác biệt lớn nhất so với guide cũ / Requiment gốc:** Board KHÔNG có route `POST /board/decisions` (tạo quyết định) — chỉ **EDITOR/SUPER_ADMIN** tạo được. Board cũng KHÔNG tự tạo/mở/kết thúc phiên họp (`POST /board/sessions`, `PATCH .../start`, `.../conclude`, `.../phase` đều chỉ EDITOR/SUPER_ADMIN). Vai trò của Board trong module `board` chỉ có: **xem** (config/sessions/decisions/reports/messages) và **bỏ phiếu** (`POST /board/decisions/:id/vote`). Toàn bộ phần "vận hành phiên họp" (mời, mở phase, chốt phiên) là việc của Editor — Board chỉ là người dự họp và bỏ phiếu qua UI.
 
@@ -100,7 +102,7 @@ Ngoài 76 route này, Board còn dùng các route **AUTH** dùng chung mọi rol
 Hội đồng Biên tập (Editorial Board) là cơ quan ra quyết định tập thể cho 3 nhóm việc:
 
 1. **Bỏ phiếu quyết định** (`board` module) — thông qua/từ chối serial hoá series mới (Flow 1), quyết định CONTINUE/CANCEL/FORMAT_CHANGE/COMPLETION cho series đang chạy (Flow 5), phê duyệt điều khoản hợp đồng, tái bản, chuyển nhượng (Flow 6/7/8) — tất cả đi qua cùng một cơ chế `BoardDecision` + `Vote`.
-2. **Ký duyệt tác vụ đơn lẻ sau khi đã có quyết định tập thể** — ví dụ sau khi `BoardDecision` loại `CONTRACT` được APPROVED, một Board member gọi `POST /contracts/:id/board-approve` để chuyển trạng thái hợp đồng; sau khi `BoardDecision` loại `TRANSFER` APPROVED, một Board member gọi `POST /transfers/requests/:id/board-approve` để hiện thực hoá quyết định đó lên `TransferRequest`. Nhiều route "board-approve" ở các module khác **không tự nó là một cuộc bỏ phiếu mới** — chúng đọc lại quyết định `TRANSFER`/`CONTRACT` đã chốt ở `board` module rồi áp dụng.
+2. **Ký duyệt tác vụ đơn lẻ sau khi đã có quyết định tập thể** — ví dụ sau khi `BoardDecision` loại `TRANSFER` APPROVED, một Board member gọi `POST /transfers/requests/:id/board-approve` để hiện thực hoá quyết định đó lên `TransferRequest`. Các route "board-approve" ở module transfer/reprint **không tự nó là một cuộc bỏ phiếu mới** — chúng đọc lại quyết định đã chốt ở `board` module rồi áp dụng. 🔴 §87: **Contract ban đầu KHÔNG còn theo mô hình này** — duyệt HĐ qua comment + đại diện claim/sign (§3), không qua BoardDecision.
 3. **Duyệt chi tiền** (`payment` module) — Board là người approve/pay/cancel từng `PaymentRecord`.
 
 ### 1.1. Quan hệ giữa `BoardDecision` và các module nghiệp vụ khác
@@ -112,12 +114,21 @@ Hội đồng Biên tập (Editorial Board) là cơ quan ra quyết định tậ
 | `SERIALIZATION` | `SeriesSerializeService.serialize` — Series `PITCHED → SERIALIZED`, gán `magazine`/`startIssueNumber`/`publicationType` từ `details` | Series → `REJECTED`, notify Mangaka + Editor |
 | `CANCELLATION` | `SeriesLifecycleService.cancel` — Series → `CANCELLING`, `endingChapterAllowance` (1–10 chương) từ `details` | không đổi |
 | `COMPLETION` | `SeriesLifecycleService.complete` — Series → `COMPLETING` | không đổi |
-| `FORMAT_CHANGE` | `SeriesLifecycleService.changeFormat` — chỉ đổi `publicationType`, **không** đổi `status` | không đổi |
-| `CONTRACT` | Không tự động — Board member phải tự gọi `POST /contracts/:id/board-approve` (Nhóm B) | — |
+| `FORMAT_CHANGE` | `SeriesLifecycleService.changeFormat` — chỉ đổi `publicationType`, **không** đổi `status`. ⚠ **bắt buộc `details.publicationType`** (xem cảnh báo dưới bảng) | không đổi |
+| `CONTRACT` | 🔴 §87: duyệt HĐ ban đầu **KHÔNG** qua BoardDecision/vote nữa — dùng comment tư vấn + 1 đại diện claim + `sign-representative` (Nhóm B). BoardDecision loại `CONTRACT` chỉ còn cho Amendment/Transfer. | — |
 | `TRANSFER` | Không tự động — Board member phải tự gọi các route `board-approve`/`board-reject`/`assign-full-buyout` ở `transfers/requests/:id/...` (Nhóm D), route sẽ tự đọc lại `BoardDecision` này qua `boardDecisionId` để xác thực | — |
 | `REPRINT` | Route `board-approve` của reprint (Nhóm D) là bước quyết định trực tiếp (KHÔNG cần `BoardDecision` loại `REPRINT` trước) | — |
 
 → **FE quan trọng cần nhớ:** với `SERIALIZATION`/`CANCELLATION`/`COMPLETION`/`FORMAT_CHANGE`, sau khi bỏ phiếu đủ để APPROVED thì **không cần thao tác gì thêm** — Series tự chuyển trạng thái. Với `CONTRACT`/`TRANSFER`, bỏ phiếu APPROVED chỉ là bước 1 — Board member (bất kỳ ai trong roster phiên đó) còn phải vào Contract/Transfer detail bấm nút hành động tương ứng để "thực thi" quyết định.
+
+> ✅ **ĐÃ FIX (§84, 2026-07-29) — `FORMAT_CHANGE` không còn silent no-op.**
+> **Trước:** tạo decision `FORMAT_CHANGE` mà thiếu `details.publicationType` vẫn được nhận **201**; Board vote
+> APPROVED xong listener chỉ ghi `logger.warn` rồi `return` ⇒ series **đứng yên**, không notify, không sinh
+> Amendment — mà UI vẫn báo thành công. Guide cũ phải dặn FE tự validate client-side.
+> **Nay:** `POST /board/decisions` **chặn ngay ở tầng Zod** → **422** với `errors[].path = "details.publicationType"`
+> nếu thiếu hoặc không thuộc `WEEKLY | MONTHLY | IRREGULAR`. Không còn tồn tại decision `FORMAT_CHANGE` vô nghĩa.
+> **FE:** vẫn nên validate client-side để báo sớm, nhưng **không còn là lớp bảo vệ duy nhất**; hãy hiển thị
+> `errors[].message` từ 422 thay vì tự đoán.
 
 ---
 
@@ -316,7 +327,7 @@ Không tham số. Response `BoardDashboardRes`:
 |---|---|---|
 | `pendingDecisions` | mảng `{decisionId, boardSessionId, decisionType, targetSeries: {id,title}\|null, phase, result}` | Quyết định thuộc phiên **đang có** Board tham gia (dựa trên `boardActiveSessions(userId)`), lọc bỏ record thiếu `decisionType`/`result`/`phase` |
 | `upcomingSessions` | number | Đếm phiên `UPCOMING` mà mình nằm trong roster |
-| `atRiskSevere` | mảng `{seriesId, title, rankPosition}` | Series đang ở `riskLevel=SEVERE` (cache dùng chung `ranking:severe`, TTL theo `RANKING_SHARED_TTL_SEC`) — chính là "danh sách series nguy cơ cần xem xét" nêu ở Requiment §2.4.c |
+| `atRiskSevere` | mảng `{seriesId, title, rankPosition}` | Series đang ở `riskLevel=SEVERE` (cache dùng chung `ranking:severe`, TTL theo `RANKING_SHARED_TTL_SEC`) — chính là "danh sách series nguy cơ cần xem xét" nêu ở Requiment §2.4.c. 🆕 **2026-08-05:** bộ truyện đã chốt số phận (`CANCELLING`/`COMPLETING`/`CANCELLED`/`COMPLETED`) **không còn** lọt vào đây — trước đây bộ truyện đã hoàn thành vẫn có thể bị báo "nguy cơ bị huỷ". `HIATUS` vẫn loại như cũ. Shape response KHÔNG đổi, chỉ đổi giá trị `isAtRisk`/`riskLevel`. |
 | `unreadNotifications` | number | Badge chuông |
 
 Không có bảng lỗi riêng (không `@ApiErrors`).
@@ -327,27 +338,30 @@ Không có bảng lỗi riêng (không `@ApiErrors`).
 
 ### 3.1. Trạng thái hợp đồng & vai trò Board (`ContractStatus`, `CONTRACT_TRANSITIONS` trong `contract.constant.ts`)
 
+> 🔴 **§87 (2026-08-01) — flow ký đổi sang 2-PHASE.** State machine mới:
 ```
-DRAFT → MANGAKA_REVIEW → MANGAKA_APPROVED → BOARD_APPROVED → (ký cả 2 bên, thứ tự tự do) →
-  MANGAKA_SIGNED hoặc FULLY_EXECUTED trực tiếp → FULLY_EXECUTED
-NEGOTIATION (từ MANGAKA_REVIEW/MANGAKA_APPROVED/BOARD_APPROVED) → quay lại MANGAKA_REVIEW
-ACTIVATION_PENDING → FULLY_EXECUTED (chỉ dùng cho hợp đồng thay thế của giao dịch FULL_BUYOUT transfer)
+DRAFT → BOARD_REVIEW → AWAITING_MANGAKA → FULLY_EXECUTED
+AWAITING_MANGAKA → ACTIVATION_PENDING → FULLY_EXECUTED  (chỉ HĐ thay thế của giao dịch FULL_BUYOUT transfer)
+AWAITING_MANGAKA → REJECTED_BY_MANGAKA  (Mangaka từ chối → Editor redraft HĐ mới)
+DRAFT|BOARD_REVIEW|AWAITING_MANGAKA → VOIDED
 FULLY_EXECUTED → FULFILLED | TERMINATED | TERMINATED_BY_BREACH | EXPIRED
 ```
 
-⚠️ **Board KHÔNG có route "định giá" riêng.** Requiment Flow 6 mô tả "Board định giá (`valuationAmount`) + chọn loại hợp đồng" như bước mở đầu, nhưng trong code thật `valuationAmount`/`contractType`/tỷ lệ sở hữu là field Editor tự nhập khi khởi tạo (`POST /contracts`, **EDITOR-only** — không có trong danh sách route Board). Board chỉ tham gia hợp đồng ở khâu **duyệt bản Editor đã soạn** (Board nhìn thấy con số Editor đưa ra, không tự nhập số) — nếu thấy định giá/tỷ lệ chưa hợp lý thì dùng `board-request-changes` (bước 2 dưới đây) để đẩy về `NEGOTIATION`, Editor sửa lại theo ý kiến ngoài hệ thống rồi gửi lại. Đây là cách hệ thống hiện thực hoá "Board định giá" — không phải một API riêng.
+⚠️ **Board KHÔNG có route "định giá" riêng.** `valuationAmount`/`contractType`/tỷ lệ sở hữu do **Editor** nhập ở `POST /contracts` (EDITOR-only). Board tham gia ở **Phase 1 nội bộ**: đọc + comment tư vấn, cử **1 đại diện** ký.
 
-Board tham gia đúng 2 bước quyết định + 1 bước ký:
+🔴 **Duyệt HĐ KHÔNG dùng BoardDecision/vote nữa** (§87, BR-CONTRACT-08). Không còn `board-approve`/`board-request-changes`/`signatures/board` (đã XOÁ). Thay bằng: comment tư vấn (non-binding) + **1 đại diện claim** (là người duy nhất quyết + ký thay NXB). Board tham gia đúng chuỗi sau:
 
-1. **`POST /contracts/:id/board-approve`** — khi hợp đồng đang `MANGAKA_APPROVED`, **bất kỳ 1 Board member nào** thuộc roster của `BoardDecision` gắn với hợp đồng (`contract.boardDecision.boardSession.allowedEditorIds`) gọi route này là đủ để chuyển `MANGAKA_APPROVED → BOARD_APPROVED` — đây **không phải** bỏ phiếu tập thể, chỉ cần 1 người xác nhận (khác hẳn với bước ký ở dưới cần TOÀN BỘ roster).
-2. **`POST /contracts/:id/board-request-changes`** — tại `MANGAKA_APPROVED` hoặc `BOARD_APPROVED`, 1 Board member trong roster yêu cầu sửa → về `NEGOTIATION`, đồng thời **xoá sạch chữ ký đã có** (`mangakaSignedAt`/`boardSignedAt` reset `null`).
-3. **`POST /contracts/:id/signatures/board`** — ký OTP; cần **TOÀN BỘ** thành viên `allowedEditorIds` của roster đã ký mới coi là board-side hoàn tất (đếm `signatureCount` so với `totalRequiredSigns = allowedEditorIds.length`).
+1. **`GET/POST /contracts/:id/comments`** — khi HĐ `BOARD_REVIEW`, Board trong roster (roster = `allowedEditorIds` của `BoardDecision` SERIALIZATION gắn HĐ) để **comment tư vấn** (text, non-binding). Editor đọc để sửa điều khoản.
+2. **`POST /contracts/:id/claim`** — **1 Board member nhận làm ĐẠI DIỆN** (atomic first-come; chỉ người trong roster). Đại diện là người **duy nhất** quyết (khi comment mâu thuẫn, Editor theo ý đại diện) và ký thay NXB. Trùng → 409 `Error.ContractRepresentativeAlreadyClaimed`.
+3. **`POST /contracts/:id/release`** — đại diện nhả (chỉ **trước khi ký**).
+4. **`POST /contracts/:id/sign-representative`** — đại diện **ký OTP** → `BOARD_REVIEW → AWAITING_MANGAKA` (khoá điều khoản, chuyển sang Phase 2 Mangaka). **Chỉ đại diện ký — KHÔNG cần toàn bộ roster.**
+   - Nếu không ai claim quá `boardRepClaimGraceDays` → Super Admin gán qua `POST /contracts/:id/assign-representative` (route SUPER_ADMIN).
 
 ### 3.2. Route chi tiết
 
 #### `GET /contracts` — danh sách theo scope role
 
-Không tham số (không phân trang — trả toàn bộ theo scope). Board xem **toàn bộ hợp đồng hệ thống** (`assertCanView` cho qua ngay nếu `roleName === BOARD_MEMBER`, không lọc theo sở hữu như Editor/Mangaka). Response mảng `ContractListItemRes` (bớt `boardDecision`, `terminationClause`, `sourceTransferRequestId`, `mangakaSignedAt`, `boardSignedAt` so với detail).
+Không tham số (không phân trang — trả toàn bộ theo scope). Board xem **toàn bộ hợp đồng hệ thống** (`assertCanView` cho qua ngay nếu `roleName === BOARD_MEMBER`, không lọc theo sở hữu như Editor/Mangaka). Response mảng `ContractListItemRes` (bớt `boardDecision`, `terminationClause`, `sourceTransferRequestId`, `mangakaSignedAt`, `representativeSignedAt`, `mangakaRejectedAt`, `rejectionReason` so với detail — vẫn giữ `representativeId`/`representative`/`supersedesContractId`).
 
 #### `GET /contracts/:id` — chi tiết hợp đồng
 
@@ -363,9 +377,15 @@ Không tham số (không phân trang — trả toàn bộ theo scope). Board xem
 | `valuationAmount`, `publisherOwnershipPct`, `mangakaOwnershipPct` | number \| null | |
 | `terminationClause` | string \| null | |
 | `contractStart`, `contractEnd` | string (ISO) \| null | |
-| `status` | `enum ContractStatus` | |
-| `mangakaSignedAt`, `boardSignedAt` | string \| null | |
+| `status` | `enum ContractStatus` | 2-phase (§87) |
+| `mangakaSignedAt` | string \| null | thời điểm Mangaka ký (Phase 2) |
+| `representativeId` / `representative` | string \| null / UserMini \| null | 🆕 §87 — Board đại diện đã claim/gán |
+| `representativeSignedAt` | string \| null | 🆕 §87 — thời điểm đại diện ký (kết thúc Phase 1) |
+| `supersedesContractId` | string \| null | 🆕 §87 — trỏ HĐ bị Mangaka từ chối trước đó (nếu là bản redraft) |
+| `rejectionReason` / `mangakaRejectedAt` | string \| null / string \| null | 🆕 §87 — lý do + thời điểm Mangaka từ chối |
 | `createdAt` | string | |
+
+> ⚠ **Đã bỏ `boardSignedAt`** khỏi `ContractRes` (§87 — không còn ký toàn roster). Amendment vẫn giữ `boardSignedAt` riêng.
 
 **Lỗi:** `Error.ContractNotFound` (404) · `Error.ContractAccessDenied` (403 — không áp dụng cho Board vì Board luôn qua được check).
 
@@ -386,40 +406,55 @@ Response `ContractStatusProgressRes`:
 | Field | Kiểu | Ghi chú |
 |---|---|---|
 | `id`, `status` | | |
-| `mangaka.isSigned` / `mangaka.signedAt` | boolean / string\|null | |
-| `boardProgress.totalRequired` | number | = số thành viên roster |
-| `boardProgress.totalSigned` | number | |
-| `boardProgress.signedEditors` | `{id, actionAt}[]` | |
-| `boardProgress.pendingEditors` | `{id, actionAt: null}[]` | Ai còn thiếu chữ ký — FE hiển thị "đang chờ 2/5 thành viên" |
+| `mangaka.isSigned` / `mangaka.signedAt` | boolean / string\|null | Phase 2 — Mangaka đã ký chưa |
+| `representative.id` | string \| null | 🆕 §87 — id Board đại diện; `null` = chưa ai claim |
+| `representative.claimed` | boolean | đã có đại diện chưa |
+| `representative.signed` / `representative.signedAt` | boolean / string\|null | đại diện đã ký (kết thúc Phase 1) chưa |
+
+> 🔴 §87: `boardProgress{totalRequired/signedEditors/pendingEditors}` (model ký toàn roster cũ) **đã thay** bằng `representative{...}` — chỉ 1 đại diện ký. FE bỏ UI "đang chờ x/y thành viên", thay bằng "đại diện: [tên] — đã/chưa ký".
 
 **Lỗi:** `Error.ContractNotFound` (404) · `Error.NotContractMangaka` (403, chỉ áp dụng khi role=MANGAKA khác chủ hợp đồng — Board luôn qua).
 
-#### `POST /contracts/:id/board-approve` — Board duyệt điều khoản → `BOARD_APPROVED`
+> ⚠ **Đã XOÁ** (§87): `POST /contracts/:id/board-approve`, `.../board-request-changes`, `.../signatures/board`. Board không còn "duyệt tập thể" hay "ký toàn roster" — thay bằng comment + đại diện dưới đây.
 
-Không body. Response `ContractRes` (hợp đồng sau khi chuyển trạng thái).
-**Lỗi:** `Error.ContractNotFound` (404) · `Error.BoardDecisionNotFound` (400 — hợp đồng chưa gắn `boardDecisionId`) · `Error.NotAuthorizedInBoard` (403 — không thuộc roster `allowedEditorIds` của `boardDecision.boardSession`) · `Error.InvalidContractTransition` (409 — không phải đang `MANGAKA_APPROVED`).
+#### `GET /contracts/:id/comments` — Đọc comment tư vấn (BOARD_MEMBER · EDITOR · SUPER_ADMIN) 🆕 §87
 
-#### `POST /contracts/:id/board-request-changes` — yêu cầu sửa → `NEGOTIATION`
+Response mảng `{ id, contractId, authorId, author (UserMini), content, createdAt }`.
+**Lỗi:** `Error.ContractNotFound` (404) · `Error.ContractAccessDenied` (403).
 
-| Field | Bắt buộc | Kiểu | Ghi chú |
-|---|---|---|---|
-| `reason` | ✅ | string (1–1000) | Editor cần biết sửa gì |
-
-**Lỗi:** giống `board-approve` + validate `reason` bắt buộc (422).
-
-#### `POST /contracts/:id/signatures/board` — ký OTP
+#### `POST /contracts/:id/comments` — Board để comment tư vấn (BOARD_MEMBER) 🆕 §87
 
 | Field | Bắt buộc | Kiểu | Ghi chú |
 |---|---|---|---|
-| `otpCode` | ✅ | string (6 ký tự) | OTP `purpose=SIGNING_CONTRACT` gửi tới email của Board member — xin trước qua `POST /auth/send-otp-email`? **Không** — route xin OTP ký hợp đồng nằm ngoài phạm vi convention chung, kiểm tra qua `AuthOtpService.validateOtpCode`; thực tế OTP loại này được hệ thống tự gửi khi hợp đồng vào trạng thái ký được (không có route riêng "xin OTP ký" trong danh sách BOARD_MEMBER — email chứa OTP do BE tự trigger) |
+| `content` | ✅ | string (1–2000) | góp ý điều khoản (non-binding) |
 
-Response `ContractSignRes`: `{ status: 'COMPLETED' | 'PENDING_MORE_SIGNATURES' | 'ACTIVATION_PENDING', message, contract }`.
+Chỉ khi HĐ `BOARD_REVIEW` và người gọi thuộc roster.
+**Lỗi:** `Error.ContractNotFound` (404) · `Error.ContractNotInBoardReview` (409) · `Error.NotInContractBoardRoster` (403).
 
-- `PENDING_MORE_SIGNATURES` — đã ký nhưng chưa đủ toàn bộ roster (`message` gồm số đếm `x/y`).
-- `COMPLETED` — đủ roster ký, và nếu Mangaka cũng đã ký → hợp đồng emit `ContractExecuted`, notify cả 2 bên.
-- `ACTIVATION_PENDING` — trường hợp đặc biệt cho hợp đồng **thay thế** sinh ra từ chuyển nhượng FULL_BUYOUT (Flow 8) — không publish/PDF được cho tới khi hợp đồng gốc bị terminate & activation hoàn tất.
+#### `POST /contracts/:id/claim` — Nhận làm đại diện Board (BOARD_MEMBER) 🆕 §87
 
-**Lỗi:** `Error.ContractNotFound` (404) · `Error.ContractAlreadySigned` (400) · `Error.ContractNotSignableYet` (409 — status phải `BOARD_APPROVED` hoặc `MANGAKA_SIGNED`) · `Error.BoardDecisionNotFound` (400) · `Error.NotAuthorizedInBoard` (403) · `Error.BoardMemberAlreadySigned` (400 — chính người này đã ký rồi) · `Error.ReplacementActivationInvalid`/`Error.ReplacementActivationUnavailable` (409/503 — nhánh activation hợp đồng thay thế lỗi).
+Không body. `BOARD_REVIEW`, người gọi ∈ roster, chưa ai claim → gán `representativeId = caller` (atomic).
+**Lỗi:** `Error.ContractNotFound` (404) · `Error.ContractNotInBoardReview` (409) · `Error.NotInContractBoardRoster` (403) · `Error.ContractRepresentativeAlreadyClaimed` (409 — đã có người khác nhận).
+
+#### `POST /contracts/:id/release` — Đại diện nhả (BOARD_MEMBER) 🆕 §87
+
+Không body. Chỉ khi caller = đại diện hiện tại **và chưa ký**.
+**Lỗi:** `Error.ContractNotFound` (404) · `Error.NotContractRepresentative` (403).
+
+#### `POST /contracts/:id/sign-representative` — Đại diện ký OTP → `AWAITING_MANGAKA` (BOARD_MEMBER) 🆕 §87
+
+| Field | Bắt buộc | Kiểu | Ghi chú |
+|---|---|---|---|
+| `otpCode` | ✅ | string (6 ký tự) | OTP `purpose=SIGNING_CONTRACT`, hệ thống tự gửi email khi HĐ vào trạng thái ký được (không có route "xin OTP ký" riêng) |
+
+Chỉ đại diện đã claim mới ký; ký xong → `BOARD_REVIEW → AWAITING_MANGAKA` (khoá điều khoản, sang Phase 2).
+**Lỗi:** `Error.ContractNotFound` (404) · `Error.ContractNoRepresentative` (409 — chưa ai claim) · `Error.NotContractRepresentative` (403) · `Error.ContractNotSignableYet` (409 — không ở `BOARD_REVIEW`) · OTP sai → 422/410 (như convention OTP).
+
+> Không ai claim quá `AppConfig.boardRepClaimGraceDays` → Super Admin gán qua `POST /contracts/:id/assign-representative` (SUPER_ADMIN, xem `07-super-admin.md`).
+
+Response `ContractSignRes`: `{ status, message, contract }`. Chỉ **đại diện ký** (1 người) → HĐ `BOARD_REVIEW → AWAITING_MANGAKA` (sang Phase 2 Mangaka). KHÔNG còn "chờ toàn roster ký".
+
+**Lỗi:** `Error.ContractNotFound` (404) · `Error.ContractNoRepresentative` (409 — chưa ai claim đại diện) · `Error.NotContractRepresentative` (403 — không phải đại diện đã claim) · `Error.ContractNotSignableYet` / `Error.ContractNotInBoardReview` (409 — HĐ không ở `BOARD_REVIEW`) · `Error.ContractAlreadySigned` (400) · OTP sai/hết hạn → 422/410.
 
 #### `POST /contracts/:id/revenue` — nhập doanh thu kỳ (chỉ `REVENUE_SHARE` đã `FULLY_EXECUTED`)
 
@@ -450,7 +485,7 @@ List item (`AmendmentListItemRes`) bớt `signatures`, `changedClauses`, `reason
 
 #### `POST /contracts/:contractId/amendments/:id/sign/board` — ký phụ lục OTP
 
-Body giống ký hợp đồng chính: `{ otpCode: string (6 ký tự) }`. Cùng cơ chế **cần toàn bộ roster ký** (`countBoardSignatures >= allowedEditorIds.length` mới set `boardSignedAt`); nếu cả Mangaka lẫn Board đã ký đủ → tự chuyển `FULLY_EXECUTED`.
+Body: `{ otpCode: string (6 ký tự) }`. ⚠ **Amendment vẫn giữ cơ chế đa-ký cũ** (NGOÀI phạm vi §87 — khác hẳn HĐ chính nay chỉ 1 đại diện ký): **cần TOÀN BỘ roster ký** (`countBoardSignatures >= allowedEditorIds.length` mới set `boardSignedAt` trên amendment); khi cả Mangaka lẫn Board ký đủ → amendment `FULLY_EXECUTED`.
 **Lỗi:** `Error.AmendmentNotPendingSignatures` (409) · `Error.NotAuthorizedInBoard` (403) · `Error.BoardMemberAlreadySigned` (400).
 
 #### `GET /contracts/:contractId/payment-conditions` — điều kiện thanh toán của hợp đồng
@@ -675,6 +710,18 @@ Response: `MessageResDto { message, newContractId }`. Request chuyển `UNDER_RE
 
 #### `POST /transfers/contracts/:id/sign` — ký hợp đồng chuyển nhượng 3 bên bằng OTP
 
+**Lấy `:id` (`transferContractId`) ở đâu — 🆕 Spec 27 (2026-07-29):** đọc field **`transferContractId`** trên `GET /transfers/requests/pending-board` hoặc `GET /transfers/requests/:id` (`null` khi Editor chưa soạn hợp đồng). Trước Spec 27 field này không tồn tại ⇒ Board không có đường lấy id để ký; nếu bạn đọc code/tài liệu cũ hơn 2026-07-29 thì đó là lý do.
+
+🔔 **Nay CÓ notification tới lượt ký (§84, 2026-07-29).** Board ký **thứ ba** (sau A rồi B). Khi Mangaka B ký
+xong, **toàn bộ roster Board của phiên** nhận notification `NotificationType.CONTRACT` với
+`referenceType: 'TRANSFER_CONTRACT_AWAITING_SIGNATURE'` và `referenceId = transferContractId` (dùng thẳng cho
+`GET /transfers/contracts/:id` + `POST /transfers/contracts/:id/sign`). Trước §84 chuỗi ký im lặng hoàn toàn —
+Board phải tự vào `pending-board` dò. Notification là **best-effort**: vẫn phải coi route GET là nguồn sự thật.
+
+⚠️ **Đừng nhầm với `originalContractId`** — đó là **Contract (hợp đồng XUẤT BẢN)** cũ của series, khác entity, không dùng được với `/transfers/contracts/:id/*`.
+
+**Board ký SAU CÙNG nên bắt buộc đọc điều khoản trước:** gọi 🆕 **`GET /transfers/contracts/:id`** (route mới, Board xem được) để thấy `transferAmount`, `newOwnershipSplit`, `coOwnerApprovalRequired`, `status` và danh sách chữ ký A/B — trước đó chỉ có route xem chữ ký, tức Board ký mà không thấy điều khoản. Chi tiết field xem `03-mangaka.md` §5.6 (cùng shape, cùng RBAC).
+
 | Field | Bắt buộc | Kiểu | Ghi chú |
 |---|---|---|---|
 | `otpCode` | ✅ | string (6 ký tự) | |
@@ -762,10 +809,9 @@ Field đáng chú ý cho Board: `magazine`/`startIssueNumber` (slot Board chọn
 
 **Flow 11 (Sequel/Franchise) — không có route/section riêng vì KHÔNG cần:** series phái sinh chỉ thêm 2 field khai báo lúc tạo proposal (`parentSeriesId`, `relationshipType` ∈ `SEQUEL/SPINOFF/SIDE_STORY/REBOOT`) rồi chạy lại nguyên vẹn Flow 1 (pitch/vote — §2) + Flow 6 (hợp đồng riêng — §3) như series thường; Board không có hành động nào khác biệt. `franchiseConsentStatus` (field trên `Series`, xuất hiện ở `GET /series/:id` chi tiết, bị lược khỏi list) chỉ liên quan tới **Mangaka gốc** của series cha khi series cha đang `REVENUE_SHARE` — hệ thống chặn pitch series phái sinh (`Error.franchiseConsentRequired`, 409) tới khi Mangaka gốc đồng ý; nếu series cha `FULL_BUYOUT` thì bỏ qua field này (Board toàn quyền). Board chỉ cần đọc field này để biết series phái sinh có đang bị chặn ở bước Mangaka gốc consent hay đã sẵn sàng vào vote — không có action nào của Board tác động lên field này.
 
-#### `GET /series/:id/names` / `GET /series/:id/names/:nameId` — Name (storyboard) của proposal
+#### Storyboard pages của proposal (Spec 28)
 
-Response mỗi `NameRes`: `{ id, seriesId, chapterNumber: null (Name proposal), kind: enum NameKind, status: enum NameStatus, version, submittedAt, pages: [{pageNumber, fileUrl}] }`. Đây là tài liệu "Name/storyboard" nêu ở Requiment §2.4.a bước 1 — Board xem cùng `synopsis`/`characterDesigns` trong `series.proposal` trước khi bỏ phiếu `SERIALIZATION`.
-**Lỗi:** `Error.SeriesNotFound` (404) · `Error.NameNotFound` (404, chỉ detail).
+Hai route `/series/:id/names*` đã xoá. Board đọc `proposal.storyboardPages[]` trực tiếp trong `GET /series/:id`, cùng `synopsis` và `characterDesigns`, trước khi bỏ phiếu `SERIALIZATION`. Các trang này không có lifecycle Storyboard độc lập.
 
 ### 6.2. Series Defense Dashboard — `GET /series/:id/defense-dashboard`
 
@@ -807,7 +853,9 @@ Response `{ items: PublicationVersionRes[] }` (list) hoặc object đơn (detail
 
 #### `GET /survey-periods` / `GET /survey-periods/:id` — kỳ bình chọn
 
-Response `SurveyPeriodRes`: `{ id, magazine, publicationType: enum PublicationType, eligibleSeriesIds: string[], issueNumber, reflectedIssueNumber, startDate, endDate, status: enum SurveyStatus }`. `reflectedIssueNumber` = số kỳ tạp chí mà kết quả **thực sự phản ánh** (lệch ~8 tuần so với `issueNumber` — đúng như Requiment mô tả).
+🆕 **W1 (2026-08-02):** `GET /survey-periods` nay có **filter + phân trang** (`?magazine=&publicationType=&status=&limit=&offset=`) và response ĐỔI SHAPE thành **`{ items: SurveyPeriodRes[], total, limit, offset }`** (breaking — trước là mảng thô). `GET /survey-periods/:id` giữ nguyên `SurveyPeriodRes`.
+
+`SurveyPeriodRes`: `{ id, magazine, publicationType: enum PublicationType, eligibleSeriesIds: string[], issueNumber, reflectedIssueNumber, startDate, endDate, status: enum SurveyStatus }`. `reflectedIssueNumber` = số kỳ tạp chí mà kết quả **thực sự phản ánh** (lệch ~8 tuần so với `issueNumber` — đúng như Requiment mô tả).
 
 #### `GET /survey-periods/:id/votes` — phiếu vote độc giả thô
 
@@ -829,6 +877,10 @@ Response `{ items: RankingRecordRes[] }`, mỗi item đầy đủ nội bộ (kh
 
 Response `{ items: BoardRankingItem[] }` — giống `RankingRecordRes` nhưng **bớt** `consecutiveAtRiskCount` (không cần thiết ở view toàn tạp chí), thêm `recordedAt`.
 **Lỗi:** `Error.SurveyPeriodNotFound` (404).
+
+✅ **Xem xếp hạng TỔNG HỢP nhiều kỳ CÓ tín hiệu nguy cơ — route nội bộ MỚI (W1, 2026-08-02):** **`GET /rankings/internal/aggregate?magazine=&publicationType=&level=MONTH|YEAR&year=&month=`** (BOARD_MEMBER/EDITOR/MANGAKA/SUPER_ADMIN). Là bản nội bộ của `/rankings/aggregate` (public): gộp nhiều kỳ REFLECTED theo `averageNormalizedScore`, NHƯNG mỗi item **có thêm `isAtRisk`/`riskLevel`/`isReliable`** (lấy record kỳ mới nhất) — chính là thứ Board cần để đánh giá series nguy cơ qua thời gian. `isProvisional=true` = series tham gia quá ít kỳ → chưa đáng tin.
+- Route public `GET /rankings/aggregate` vẫn tồn tại nhưng **ẩn** 3 tín hiệu trên — chỉ dùng cho Guest.
+- Vẫn chỉ gom theo **tháng/năm dương lịch**. Muốn "N kỳ liên tiếp nguy cơ" của 1 series → `consecutiveAtRiskCount` ở `GET /survey-periods/:id/rankings`, hoặc `GET /rankings?seriesId=&periods=N`.
 
 #### `GET /rankings` — trend ranking của 1 series (scoped theo owner, Board luôn qua)
 
@@ -863,7 +915,7 @@ Response `{ items: AuditLogRes[], total, limit, offset }`, mỗi item: `{ id, ac
 | `availableFrom`/`availableTo` | tuỳ | ISO datetime (có offset) | |
 | `limit`/`offset` | tuỳ | number | |
 
-Response `{ items, total, limit, offset }` — ẩn email/phone, ưu tiên sắp xếp theo `isRecommended`/`reputationScore`.
+Response `{ items, total, limit, offset }` — mỗi item **kèm `email`/`phoneNumber` để liên hệ** (2026-08-04), ưu tiên sắp xếp theo `isRecommended`/`reputationScore`. ⚠ Chỉ liệt kê Assistant đã build hồ sơ.
 
 #### `GET /mangakas` — danh bạ Mangaka
 
@@ -874,7 +926,7 @@ Response `{ items, total, limit, offset }` — ẩn email/phone, ưu tiên sắp
 | `level` | tuỳ | string | |
 | `limit`/`offset` | tuỳ | number | |
 
-Response cùng dạng phân trang, ẩn email/phone.
+Response cùng dạng phân trang, mỗi item **kèm `email`/`phoneNumber` để liên hệ** (2026-08-04). ⚠ Chỉ liệt kê Mangaka đã build hồ sơ.
 
 #### `GET/PUT /me/staff-profile` — hồ sơ nghiệp vụ của chính Board member
 
@@ -892,12 +944,12 @@ Response cùng dạng phân trang, ẩn email/phone.
 
 ### 6.8. Production reference (đọc để nắm tiến độ sản xuất trước khi bỏ phiếu/duyệt)
 
-7 route sau đây **không nằm trong danh sách định hướng ban đầu** của nhiệm vụ (chỉ liệt kê Series/Survey/Publication/Audit/Reference) nhưng có thật trong `route-roles.ts` với `BOARD_MEMBER` trong `allowed[]` — đã bổ sung đủ để khớp 76 route:
+7 route sau đây **không nằm trong danh sách định hướng ban đầu** của nhiệm vụ (chỉ liệt kê Series/Survey/Publication/Audit/Reference) nhưng có thật trong `route-roles.ts` với `BOARD_MEMBER` trong `allowed[]`:
 
-#### `GET /chapters/:id/names` / `GET /chapters/:id/names/:nameId` — Name của 1 chapter cụ thể (khác `/series/:id/names` ở §6.1, đây là Name gắn theo chapter, thực tế 0..1)
+#### `GET /chapters/:id/storyboards` / `GET /storyboards/:id` — Storyboard của chapter (thực tế 0..1)
 
-Cùng shape `NameRes` như §6.1, chỉ khác nguồn (`kind=CHAPTER`, có `chapterNumber`).
-**Lỗi:** `Error.ChapterNotFound` (404) · `Error.NameNotFound` (404, chỉ detail).
+Response dùng `StoryboardRes`: `{ id, chapterId, status: enum StoryboardStatus, version, submittedAt, pages: [{pageNumber, fileUrl}] }`.
+**Lỗi:** `Error.ChapterNotFound` (404) · `Error.StoryboardNotFound` (404, chỉ detail).
 
 #### `GET /chapters/:id/pages` — danh sách trang của chapter
 
@@ -910,7 +962,7 @@ Response `ChapterProgressRes`:
 
 | Field | Kiểu | Ghi chú |
 |---|---|---|
-| `nameStatus` | `enum NameStatus` \| null | null nếu chapter chưa gắn Name |
+| `storyboardStatus` | `enum StoryboardStatus` \| null | null nếu chapter chưa có Storyboard |
 | `totalPages`/`pagesReady`/`pagesPending` | number | |
 | `taskBreakdown` | `Record<enum TaskStatus, number>` zero-filled | |
 | `deadline`/`remainingHours` | string/number \| null | |
@@ -954,9 +1006,9 @@ Response: `{ downloadUrl, expiresAt }`. Board (cùng Super Admin) được xem *
 
 ---
 
-## 7. Đối chiếu hoàn thiện — 76/76 route
+## 7. Đối chiếu hoàn thiện — 80/80 route
 
-Đã viết đủ **76/76 route** BOARD_MEMBER theo `route-roles.ts` (không route nào bỏ sót). 7 route production-reference (`/chapters/:id/names`, `/chapters/:id/names/:nameId`, `/chapters/:id/pages`, `/chapters/:id/progress`, `/chapters/:id/stages`, `/revision-requests`, `/tasks/:id/download-url`) không nằm trong định hướng đọc ban đầu của nhiệm vụ nhưng đã được phát hiện qua grep `route-roles.ts` và bổ sung ở §6.8.
+Đã viết đủ **80/80 route** BOARD_MEMBER theo `route-roles.ts` (không route nào bỏ sót; 2 route /series-requests mới của Spec 30 là read-only để theo dõi). 7 route production-reference (`/chapters/:id/storyboards`, `/storyboards/:id`, `/chapters/:id/pages`, `/chapters/:id/progress`, `/chapters/:id/stages`, `/revision-requests`, `/tasks/:id/download-url`) được mô tả ở §6.8.
 
 ### Phát hiện đáng chú ý so với guide cũ / Requiment gốc
 
@@ -964,6 +1016,6 @@ Response: `{ downloadUrl, expiresAt }`. Board (cùng Super Admin) được xem *
 2. **Công thức quorum/majority xác nhận bằng test, không suy đoán:** quorum = `totalVotes >= ceil(rosterSize*2/3)`; majority so với **tổng roster** (`approveCount > rosterSize*ratio`), không phải so với số phiếu đã bỏ; `ABSTAIN` tính vào quorum nhưng không tính vào approve/reject. Roster ở đây là `session.allowedEditorIds` (số người được mời họp phiên đó), không phải tổng Board Member toàn hệ thống.
 3. **Hoà phiếu → mặc định REJECTED**, không có cơ chế "Tổng biên tập quyết định cuối" như Requiment gốc đề xuất — đây là điểm quan trọng cần báo lại team nghiệp vụ nếu họ mong đợi hành vi khác.
 4. **`BoardDecision` loại `CONTRACT`/`TRANSFER` không tự động thực thi** khi APPROVED — Board phải chủ động vào Contract/Transfer detail bấm route hành động tương ứng (khác `SERIALIZATION`/`CANCELLATION`/`COMPLETION`/`FORMAT_CHANGE` tự động áp lên Series qua event listener).
-5. **`board-approve` (Contract) chỉ cần 1 Board member xác nhận**, nhưng **ký hợp đồng (`signatures/board`)** lại cần **toàn bộ roster** ký — 2 cơ chế khác hẳn nhau dù cùng nằm trong luồng Contract, dễ nhầm khi thiết kế UI (nút "duyệt" vs nút "ký" phải tách rõ trạng thái tiến độ khác nhau).
+5. **🔴 §87 — HĐ ban đầu nay 2-phase, KHÔNG còn "board-approve" tập thể hay "ký toàn roster".** Phase 1: Board comment tư vấn (không vote) → **1 đại diện** `claim` → `sign-representative` (chỉ 1 người ký). Phase 2: Mangaka accept/reject. UI Board cần: danh sách comment + nút "Nhận làm đại diện" (claim) + nút "Ký (OTP)" chỉ hiện cho đại diện. *(Chỉ **Amendment** — sửa HĐ sau `FULLY_EXECUTED` — mới còn giữ cơ chế đa-ký cũ.)*
 6. **`GET /revision-requests` không có route detail** — toàn bộ field phải lấy từ list (đã có `resolver` embed để không cần thêm lookup tên).
 7. `defense-dashboard` không nằm trong module `series` như brief gợi ý mà thực tế sống trong module `tankobon.controller.ts` — cùng chỗ với `POST /tankobon-sales`, phản ánh đúng thiết kế: 2 route này cùng phục vụ 1 màn hình "bảo vệ series" (Requiment §2.4.b).

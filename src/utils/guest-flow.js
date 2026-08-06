@@ -4,6 +4,14 @@ const publicationTypeLabels = {
   IRREGULAR: "Không định kỳ",
 };
 
+export function getMagazineOptions(openPeriods = []) {
+  return [...new Set(
+    openPeriods
+      .map((period) => period.magazine?.trim())
+      .filter(Boolean),
+  )].sort((left, right) => left.localeCompare(right));
+}
+
 export function toggleSeriesSelection(selectedIds, seriesId, maxSelections) {
   if (selectedIds.includes(seriesId)) {
     return selectedIds.filter((id) => id !== seriesId);

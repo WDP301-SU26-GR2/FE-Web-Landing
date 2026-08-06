@@ -1,16 +1,18 @@
 # §07 — SUPER_ADMIN (Quản trị hệ thống)
 
-> **Nguồn:** đọc trực tiếp `BE-dev/src/modules/users/*` (users.controller/schemas/services/repositories — Nhóm A), `BE-dev/src/modules/app-config/*`, `BE-dev/src/modules/board/{board.controller.ts, schemas/board-schema.ts, schemas/board.model.ts, services/board-governance.service.ts, board.repo.ts}` (Nhóm B — Board Config), `BE-dev/src/modules/survey/{survey.controller.ts, schemas/survey-config.schemas.ts, services/survey-config.service.ts, repositories/survey-config.repository.ts}` (Nhóm B — Voting Config), `BE-dev/src/modules/audit/*` (Nhóm C), và toàn bộ controller/schema các module còn lại cho Nhóm D (dashboard, deadline, payment, publication, reprint, revision, series, survey (period/ranking/vote), tankobon, task, transfer). Đối chiếu quyền route với `BE-dev/test/flows/route-roles.ts` (nguồn sự thật duy nhất, 276 route). Ngày dựng: 2026-07-27.
+> 🔴 **2026-08-06 — xem [`08-spec-2026-08-06-magazines-decisions-flows.md`](08-spec-2026-08-06-magazines-decisions-flows.md) (có FLOW ① tạp chí/ranking/kỳ vote):** 5 route mới thuộc Super Admin — quản lý **danh mục tạp chí** `POST`/`PATCH`/`DELETE /admin/magazines[/:name]` + đọc `GET /magazines`, và **sửa slot** `PATCH /admin/series/:id/slot` (đường sửa `magazine` rác đã lỡ nhập). Seed tạp chí **trước** khi Editor mở serial hoá thật.
+>
+> **Nguồn:** đọc trực tiếp code và đối chiếu quyền route với `BE-dev/test/flows/route-roles.ts` (nguồn sự thật duy nhất: **284 route** sau Spec 30/31). Ngày dựng: 2026-07-27; cập nhật §87/Spec 29: 2026-08-02; Spec 30/31: 2026-08-04.
 > Đọc trước [`00-INDEX.md`](00-INDEX.md) (mục lục) và **bắt buộc** [`01-conventions-and-auth.md`](01-conventions-and-auth.md) (envelope, lỗi, phân trang, upload R2, enum §7, `GET/PATCH /me`) — file này KHÔNG lặp lại các quy ước đó.
 > Enum ghi dạng `enum X` → tra giá trị đầy đủ ở `01-conventions-and-auth.md` §7.
 
 ---
 
-## 0. Tổng quan phạm vi — 75 route độc quyền SUPER_ADMIN
+## 0. Tổng quan phạm vi — 79 route độc quyền SUPER_ADMIN
 
-Đối chiếu `test/flows/route-roles.ts`: SUPER_ADMIN có đúng **75 route** trong `allowed[]`. Phần lớn (60/75) là route **đọc để theo dõi toàn hệ thống** (Nhóm D) — các route này đã/sẽ được mô tả đầy đủ ở file role sở hữu chính (Editor `05-editor.md`, Board `06-board-member.md`, Mangaka `03-mangaka.md`); ở đây chỉ tóm tắt đủ để dựng màn "Admin xem tổng" + các trường hợp Admin có **quyền ghi ngang Editor/Board** (POST/PATCH/DELETE) trên vài route.
+Đối chiếu `test/flows/route-roles.ts`: SUPER_ADMIN có đúng **79 route** trong `allowed[]` sau Spec 30/31 (77 + 2 route đọc `GET /series-requests` và `GET /series-requests/:id`). Hai route proposal-Name đã bị xoá; hai route chapter-Name được đổi sang Storyboard.
 
-Ngoài 75 route này, Admin còn dùng các route **AUTH** dùng chung mọi role (xem `01-conventions-and-auth.md` §5.8, §3, §4): `GET/PATCH /me`, `POST /uploads/sign` + `/sign-download`, `GET /notifications` + đánh dấu đã đọc.
+Ngoài 79 route này, Admin còn dùng các route **AUTH** dùng chung mọi role (xem `01-conventions-and-auth.md` §5.8, §3, §4): `GET/PATCH /me`, `POST /uploads/sign` + `/sign-download`, `GET /notifications` + đánh dấu đã đọc.
 
 | # | Method | Path | Nhóm | Mục |
 |---|---|---|---|---|
@@ -33,10 +35,8 @@ Ngoài 75 route này, Admin còn dùng các route **AUTH** dùng chung mọi rol
 | 17 | GET | `/series` | D | §5 Series & Chapter (theo dõi) |
 | 18 | GET | `/series/:id` | D | §5 |
 | 19 | GET | `/series/:id/defense-dashboard` | D | §5 |
-| 20 | GET | `/series/:id/names` | D | §5 |
-| 21 | GET | `/series/:id/names/:nameId` | D | §5 |
-| 22 | GET | `/chapters/:id/names` | D | §5 |
-| 23 | GET | `/chapters/:id/names/:nameId` | D | §5 |
+| 22 | GET | `/chapters/:id/storyboards` | D | §5 |
+| 23 | GET | `/storyboards/:id` | D | §5 |
 | 24 | GET | `/chapters/:id/pages` | D | §5 |
 | 25 | GET | `/chapters/:id/progress` | D | §5 |
 | 26 | GET | `/chapters/:id/stages` | D | §5 |
@@ -72,6 +72,7 @@ Ngoài 75 route này, Admin còn dùng các route **AUTH** dùng chung mọi rol
 | 56 | DELETE | `/publication-versions/:id` | D | §10 |
 | 57 | GET | `/rankings` | D | §11 Rankings |
 | 58 | GET | `/rankings/board` | D | §11 |
+| 58b 🆕 | GET | `/rankings/internal/aggregate` | D | §11 (W1 — aggregate nội bộ giữ risk signal) |
 | 59 | GET | `/reprint-requests` | D | §12 Reprint requests |
 | 60 | GET | `/reprint-requests/:id` | D | §12 |
 | 61 | GET | `/reprint-requests/:id/chapters` | D | §12 |
@@ -88,9 +89,17 @@ Ngoài 75 route này, Admin còn dùng các route **AUTH** dùng chung mọi rol
 | 72 | GET | `/survey-periods/:id/votes` | D | §14 |
 | 73 | POST | `/tasks/:id/download-url` | D | §15 Task file download |
 | 74 | GET | `/transfers/contracts/:id/signatures` | D | §16 Transfers |
+| 74b 🆕 | GET | `/transfers/contracts/:id` | D | §16 Transfers (Spec 27) |
 | 75 | GET | `/transfers/requests/:id` | D | §16 |
 
-**Phát hiện quan trọng — Admin KHÔNG chỉ đọc:** 15 route trong Nhóm D là **hành động ghi** (POST/PATCH/DELETE) mà Admin có quyền ngang Editor (Board sessions/decisions, Publication versions, Survey periods/import/finalize/status) hoặc ngang Board Member (Payments pay/cancel). Đây là điểm khác với mô tả "Admin chỉ quản lý tài khoản" ở `Requiment.md` §2.6 (xem ghi chú cuối file).
+**Phát hiện quan trọng — Admin KHÔNG chỉ đọc:** 15 route trong Nhóm D là **hành động ghi** (POST/PATCH/DELETE) mà Admin có quyền ngang Editor (Board sessions/decisions, Publication versions) hoặc ngang Board Member (Payments pay/cancel). Đây là điểm khác với mô tả "Admin chỉ quản lý tài khoản" ở `Requiment.md` §2.6 (xem ghi chú cuối file).
+
+> 🔴 **§84 (2026-07-29) — 4 route vận hành kỳ bình chọn nay ĐỘC QUYỀN Admin (trước là ngang Editor):**
+> `POST /survey-periods` · `PATCH /survey-periods/:id/status` · `POST /survey-data/import` ·
+> `POST /survey-periods/:id/finalize`. Lý do nghiệp vụ: `SurveyPeriod` là đơn vị theo **kỳ phát hành của cả
+> tạp chí**, trong khi Editor/Tantou chỉ phụ trách vài series (Requiment §2.6 — scoping theo sở hữu/phân công);
+> riêng `finalize` chốt xếp hạng so sánh toàn bộ series nên Editor thực hiện là **xung đột lợi ích**.
+> Editor **vẫn đọc được** toàn bộ survey/ranking. ⇒ **FE: màn vận hành kỳ bình chọn giờ chỉ có ở Admin.**
 
 ---
 
@@ -253,22 +262,28 @@ Không tham số. Snapshot `groupBy` tại thời điểm gọi (không cache).
 
 ### 2.1. `GET/PATCH /admin/app-config` — Tham số nghiệp vụ toàn hệ thống
 
-Nguồn: `app-config.controller.ts` → `app-config.service.ts` (cache in-memory TTL **30 giây**, lazy-seed lần gọi đầu nếu chưa có record). **8 tham số** (không phải 7 — verify trực tiếp `AppConfigResSchema` + `prisma/schema.prisma` model `AppConfig`):
+Nguồn: `app-config.controller.ts` → `app-config.service.ts` (cache in-memory TTL **30 giây**, lazy-seed lần gọi đầu nếu chưa có record). **10 tham số** (đếm lại 2026-08-04 theo `CONFIG_KEYS` + `AppConfigResSchema` + model Prisma — bản guide trước ghi 8 là **thiếu** `boardRepClaimGraceDays` của §87):
 
 | Field | Kiểu | Default (seed) | Ghi chú |
 |---|---|---|---|
 | `coOwnerApprovalGraceDays` | int ≥0 | 7 | Số ngày ân hạn cho luồng co-owner approval |
-| `nameMaxReviewRounds` | int >0 | 8 | Số vòng review Name tối đa trước cảnh báo loop |
+| `storyboardMaxReviewRounds` | int >0 | 8 | Số vòng review Storyboard tối đa trước cảnh báo loop |
 | `reputationRecommendThreshold` | float 1–5 | 4 | Điểm reputation tối thiểu để gắn nhãn "đề xuất" trong danh bạ |
 | `hiatusTooLongDays` | int >0 | 30 | Số ngày hiatus trước khi bị coi là "quá lâu" |
 | `lowVoteReliabilityThreshold` | int ≥0 | 10 | Ngưỡng số vote để coi ranking là "reliable" |
 | `rankingAggregateMinCoverageRatio` | float (0,1] | 0.5 | Coverage tối thiểu để ranking tổng hợp không bị đánh dấu provisional |
 | `maxUploadBytes` | int >0, ≤50MB | 15728640 (15MB) | Kích thước upload tối đa — dùng ở `POST /uploads/sign` (xem `01` §3) |
 | `assignmentGraceDays` | int ≥0 | 0 | Số ngày ân hạn quanh vòng đời `StudioAssignment` |
+| `boardRepClaimGraceDays` | int ≥0 | 3 | (§87) Số ngày chờ trước khi cron báo "chưa ai nhận làm đại diện ký hợp đồng" → Admin phải `assign-representative` |
+| `taskOverdueGraceHours` | int 0–168 | 24 | 🆕 **Spec 31** — số **giờ** ân hạn sau hạn nộp trước khi công việc bị **tự huỷ**. Đặt `0` = huỷ ngay khi quá hạn; trần 168 giờ (7 ngày) |
 
-**`GET`** trả đủ 8 field + `id`, `updatedBy` (userId Admin cập nhật lần cuối, `null` nếu chưa từng sửa), `updatedAt` (ISO).
+> ⚠️ **`taskOverdueGraceHours` là tham số có hậu quả phá huỷ** — hạ nó xuống sẽ khiến loạt công việc đang quá hạn
+> bị cron huỷ ở lần chạy kế tiếp (mỗi giờ một lần), trợ lý và tác giả đều nhận thông báo `TASK_AUTO_CANCELLED`.
+> UI nên có bước xác nhận riêng cho field này thay vì lưu chung một nút với các tham số vô hại.
 
-**`PATCH`** — body mọi field **optional + nullable** (gửi `null` hoặc omit = giữ nguyên giá trị cũ; **không có `.strict()` reject field lạ nào khác ngoài 8 field trên**). Chỉ field thực sự đổi giá trị mới được ghi + đẩy vào `reason` của audit log (dạng `"key: old -> new"` nối bằng dấu phẩy). Nếu không field nào đổi (mọi field omit/null hoặc giá trị y hệt hiện tại) → **không** ghi DB, không tạo audit, trả nguyên state cũ. Sau khi update thành công → cache bị invalidate ngay (`this.cached = null`) để lần `GET` kế tiếp đọc giá trị mới (không phải chờ hết 30s).
+**`GET`** trả đủ 10 field + `id`, `updatedBy` (userId Admin cập nhật lần cuối, `null` nếu chưa từng sửa), `updatedAt` (ISO).
+
+**`PATCH`** — body mọi field **optional + nullable** (gửi `null` hoặc omit = giữ nguyên giá trị cũ; **không có `.strict()` reject field lạ nào khác ngoài 10 field trên**). Chỉ field thực sự đổi giá trị mới được ghi + đẩy vào `reason` của audit log (dạng `"key: old -> new"` nối bằng dấu phẩy). Nếu không field nào đổi (mọi field omit/null hoặc giá trị y hệt hiện tại) → **không** ghi DB, không tạo audit, trả nguyên state cũ. Sau khi update thành công → cache bị invalidate ngay (`this.cached = null`) để lần `GET` kế tiếp đọc giá trị mới (không phải chờ hết 30s).
 
 **Lỗi:** chỉ có validation 422 (kiểu/khoảng giá trị sai, vd `maxUploadBytes` > 50MB cap).
 
@@ -377,11 +392,11 @@ Không có bảng lỗi riêng.
 
 | Route | Mục đích | Field chính đáng chú ý |
 |---|---|---|
-| `GET /series` | Danh sách series toàn hệ thống (phân trang, lọc `status`) | `status` (`enum SeriesStatus`), `mangaka`/`editor` mini object, `title`, `genres` |
+| `GET /series` | Danh sách series toàn hệ thống (phân trang, lọc `status` + **`magazine` + `publicationType` — MỚI 2026-08-05**) | `status` (`enum SeriesStatus`), `magazine`, `publicationType`, `mangaka`/`editor` mini object, `title`, `genres` |
 | `GET /series/:id` | Chi tiết 1 series kèm `proposal` (nếu còn ở giai đoạn đề xuất) | `proposal.status` (`enum ProposalStatus`), `completionProposal`, `franchiseConsentStatus` |
 | `GET /series/:id/defense-dashboard` | Dashboard "bảo vệ" series trước Hội đồng (PB-08) — ranking trend + tankobon + báo cáo Editor + mốc serial hoá | `rankingTrend[]` (`rankPosition`, `riskLevel`, `rankChange`), `tankobon.totalUnitsSold`, `seriesReports[]`, `serialization.serializedSince` |
-| `GET /series/:id/names` + `/:nameId` | Name (storyboard) cấp proposal của series | `status` (`enum NameStatus`), `version`, `pages[]` |
-| `GET /chapters/:id/names` + `/:nameId` | Name cấp chapter | Tương tự trên, `kind: CHAPTER` |
+| `proposal.storyboardPages` trong `GET /series/:id` | Trang storyboard embedded của proposal | `pageNumber`, `fileUrl`; không có lifecycle riêng |
+| `GET /chapters/:id/storyboards` + `GET /storyboards/:id` | Storyboard cấp chapter | `status` (`enum StoryboardStatus`), `version`, `pages[]` |
 | `GET /chapters/:id/pages` | Danh sách trang của 1 chapter | `originalFile`/`compositeFile` (object key), `displayFile` (⛔ tính sẵn), `status` (`enum PageStatus`) |
 | `GET /chapters/:id/progress` | Dashboard tiến độ chapter (cảnh báo trễ deadline) | `warningLevel` (enum tính runtime `NONE`/`YELLOW`/`RED`/`CRITICAL` — không có trong `schema.prisma`, xem `01` §7 cuối) |
 | `GET /chapters/:id/stages` | Danh sách `ProductionStage` + analytics | `status` (`enum ProductionStageStatus`), thứ tự stage. 🔴 **`status` đi lùi được** (Spec 26): Mangaka mở lại giai đoạn khi Editor trả sửa ⇒ `COMPLETED → ACTIVE` và các giai đoạn sau về `LOCKED`, `completedAt` về `null`. Audit tương ứng: `AuditLog.action = 'PRODUCTION_STAGE_REOPEN'` (`entityType = CHAPTER`) — tra ở `GET /audit` |
@@ -410,6 +425,19 @@ Nguồn: `board.controller.ts`, chi tiết đầy đủ ở `06-board-member.md`
 
 ---
 
+## 6b. Can thiệp Hợp đồng 2-phase (🆕 §87) — 2 route
+
+Admin **không** list/sửa hợp đồng (`GET /contracts` + mutation là EDITOR/Board), nhưng có 2 điểm can thiệp trong flow ký 2-phase:
+
+| Route | Vai trò của Admin |
+|---|---|
+| `POST /contracts/:id/assign-representative` | **Độc quyền Admin** — gán Board đại diện ký khi **không ai `claim` quá `AppConfig.boardRepClaimGraceDays`** (cron escalate báo). Body `{ representativeId }` — phải thuộc roster của `BoardDecision` SERIALIZATION gắn HĐ. Lỗi: `Error.ContractNotFound` (404) · `Error.ContractNotInBoardReview` (409) · `Error.NotInContractBoardRoster` (403 — representativeId ngoài roster). |
+| `GET /contracts/:id/comments` | Chỉ đọc — xem comment tư vấn Board để lại ở Phase 1 (giám sát). |
+
+> Chi tiết flow 2-phase (`DRAFT→BOARD_REVIEW→AWAITING_MANGAKA→FULLY_EXECUTED`, claim/sign đại diện) xem `06-board-member.md` §3.
+
+---
+
 ## 7. Theo dõi Deadline Requests (chỉ đọc) — 2 route
 
 Nguồn: `deadline.controller.ts`, chi tiết đầy đủ ở `03-mangaka.md`/`05-editor.md`.
@@ -429,8 +457,8 @@ Nguồn: `users.controller.ts` (`listMangakas`/`listAssistants`), chi tiết đ�
 
 | Route | Query chính | Ghi chú |
 |---|---|---|
-| `GET /mangakas` | `q` (tên/penName), `genre`, `level`, `limit`/`offset` | Danh bạ Mangaka — ẩn email/phone, ưu tiên `isRecommended`/`reputationScore` |
-| `GET /assistants` | `q`, `specialization` (`enum Specialization`), `level`, `availableFrom`/`availableTo`, `limit`/`offset` | Danh bạ Assistant — cùng cơ chế ẩn thông tin liên hệ |
+| `GET /mangakas` | `q` (tên/penName), `genre`, `level`, `limit`/`offset` | Danh bạ Mangaka — **kèm `email`/`phoneNumber`** (2026-08-04), ưu tiên `isRecommended`/`reputationScore`. Chỉ liệt kê user đã build hồ sơ |
+| `GET /assistants` | `q`, `specialization` (`enum Specialization`), `level`, `availableFrom`/`availableTo`, `limit`/`offset` | Danh bạ Assistant — **kèm `email`/`phoneNumber`** để liên hệ. Chỉ liệt kê user đã build hồ sơ |
 
 Dùng cho màn Admin tra cứu nhân sự ngoài hệ thống (vd trước khi ban/block, xem nhanh reputation).
 
@@ -474,14 +502,15 @@ Lỗi/luồng nghiệp vụ đầy đủ (vd điều kiện series phải ở tr
 
 ---
 
-## 11. Rankings (chỉ đọc) — 2 route
+## 11. Rankings (chỉ đọc) — 3 route
 
-Nguồn: `survey.controller.ts` (`getRankings`/`getBoardRankings`), chi tiết đầy đủ ở `06-board-member.md`.
+Nguồn: `survey.controller.ts` (`getRankings`/`getBoardRankings`/`getInternalRankingAggregate`), chi tiết đầy đủ ở `06-board-member.md`.
 
 | Route | Query | Field chính |
 |---|---|---|
 | `GET /rankings` | `seriesId` ✅, `periods?` (default 12, ≤60) | Trend ranking của **1 series** qua nhiều kỳ (`rankPosition`, `voteCount`, `rankChange`, `riskLevel` — `enum RiskLevel`, `isReliable`) |
 | `GET /rankings/board` | (theo `surveyPeriodId` hiện hành, xem `06-board-member.md`) | Bảng xếp hạng **toàn tạp chí** 1 kỳ — cùng field trên + `recordedAt` |
+| `GET /rankings/internal/aggregate` 🆕 (W1) | `magazine` ✅, `publicationType` ✅, `level=MONTH\|YEAR` ✅, `year` ✅, `month?` | **Bản nội bộ** của `/rankings/aggregate` (public) — gộp nhiều kỳ REFLECTED theo `averageNormalizedScore`, NHƯNG **giữ tín hiệu nguy cơ**: mỗi item thêm `isAtRisk`/`riskLevel`/`isReliable` (lấy record kỳ mới nhất). Dùng khi Board/Editor cần xu hướng tháng/năm mà vẫn thấy nguy cơ (route public thì ẩn các tín hiệu này). Cache namespace `ranking` riêng (`internal:` prefix). |
 
 ---
 
@@ -510,13 +539,13 @@ Field response (`RevisionRequestRes`): `targetType`, `targetId`, `seriesId` (nul
 
 ---
 
-## 14. Survey/Voting Periods (ghi ngang Editor) — 9 route
+## 14. Survey/Voting Periods (🔴 §84: 4 route ghi nay ĐỘC QUYỀN Admin) — 9 route
 
 Nguồn: `survey.controller.ts` (phần period/ranking/import), chi tiết đầy đủ ở `05-editor.md` (B-VOT-*). Admin có **toàn quyền ghi** giống Editor trên toàn bộ vòng đời kỳ bình chọn.
 
 | Route | Vai trò/Field chính |
 |---|---|
-| `GET /survey-periods` | Danh sách kỳ bình chọn |
+| `GET /survey-periods` | 🆕 W1: filter `?magazine=&publicationType=&status=&limit=&offset=` + response `{items,total,limit,offset}` (breaking, trước là mảng thô); nay mở thêm cho MANGAKA |
 | `POST /survey-periods` | Tạo kỳ mới — `issueNumber` ✅, `magazine` ✅, `publicationType` ✅ (`enum PublicationType`), `eligibleSeriesIds` ✅ (≥1, không trùng), `startDate`/`endDate` ✅ (ISO, start<end), `status?` (chỉ `DRAFT`/`OPEN`/`CLOSED` lúc tạo) |
 | `GET /survey-periods/:id` | Chi tiết — `status` (`enum SurveyStatus`) |
 | `PATCH /survey-periods/:id/status` | Đổi trạng thái — chỉ nhận `OPEN`/`CLOSED` (không set `REFLECTED` qua route này, xem `finalize`) |
@@ -527,6 +556,36 @@ Nguồn: `survey.controller.ts` (phần period/ranking/import), chi tiết đầ
 | `GET /survey-periods/:id/votes` | Danh sách phiếu vote reader của kỳ (ẩn `identityHash`/`ipHash`/`captchaScore` — chỉ có ở bản list, không phải bản đầy đủ) |
 
 Lỗi đầy đủ (`Error.SurveyPeriodNotFound`, `Error.DuplicateSurveyPeriodScope`, `Error.SurveyPeriodInvalidTransition`...) xem `05-editor.md`.
+
+#### 🆕 `GET /survey-periods/eligible-series` — dựng danh sách chọn khi mở kỳ (MỚI 2026-08-05, SUPER_ADMIN)
+
+| Query | Bắt buộc | Kiểu | Ghi chú |
+|---|---|---|---|
+| `magazine` | ✅ | string | khớp tuyệt đối (BE tự trim) |
+| `publicationType` | ✅ | enum `PublicationType` | `WEEKLY`/`MONTHLY`/`IRREGULAR` |
+
+Response `{ items: [{ id, title, coverImage, status, magazine, publicationType }], total }` — **không phân trang**
+(một tạp chí + một nhịp chỉ vài chục bộ). Thiếu query hoặc gửi thừa key → **422**.
+
+> **Dùng đúng route này để đổ dropdown chọn `eligibleSeriesIds`.** Nó dùng **chung một hằng số** với phần validate
+> của `POST /survey-periods`, nên **mọi id nó trả về đều chắc chắn được chấp nhận** — không còn cảnh admin chọn
+> xong mới ăn 422. (`GET /series?status=...&magazine=...&publicationType=...` vẫn dùng được nhưng phải tự ghép 3
+> filter và tự phân trang, dễ lệch luật về sau.)
+
+**Trạng thái được vào kỳ (BR-VOTE-05, cập nhật 2026-08-05):**
+
+| Trạng thái | Vào kỳ được? | Lý do |
+|---|---|---|
+| `SERIALIZED` | ✅ | đang đăng bình thường |
+| `CANCELLING` · `COMPLETING` | ✅ **(MỚI)** | vẫn đang đăng chương kết thúc trên tạp chí kỳ đó ⇒ độc giả vẫn bình chọn được. **Trước 2026-08-05 bị chặn** — đó là lệch nghiệp vụ. |
+| `HIATUS` | ❌ | kỳ đó không có chương mới để bình chọn (Requiment §1.10 — tránh kéo bộ truyện xuống đáy bảng oan) |
+| `CANCELLED` · `COMPLETED` · `DRAFT` · còn lại | ❌ | không còn/chưa lên tạp chí |
+
+Sai bất kỳ điều kiện nào (kể cả lệch `magazine`/`publicationType`) → **422 `Error.SeriesNotVotable`**.
+
+> ⚠ `eligibleSeriesIds` là **snapshot bất biến** kể từ khi kỳ `OPEN`. Bộ truyện kết thúc/bị huỷ **giữa kỳ** vẫn
+> nằm trong bảng xếp hạng lúc `finalize` (đúng: nó đã nhận phiếu trong kỳ), nhưng **không còn** bị gắn
+> `isAtRisk`/`riskLevel` nữa (sửa 2026-08-05 — trước đây bộ truyện đã hoàn thành vẫn có thể bị báo "nguy cơ bị huỷ").
 
 ---
 
@@ -546,6 +605,7 @@ Nguồn: `transfer.controller.ts`, chi tiết đầy đủ ở `05-editor.md`/`0
 
 | Route | Field chính |
 |---|---|
+| `GET /transfers/contracts/:id` 🆕 | **Spec 27** — chi tiết hợp đồng chuyển nhượng: điều khoản (`transferAmount`, `newOwnershipSplit`, `transferType`, `coOwnerApprovalRequired`), `status` (`enum TransferContractStatus`) và `signatures[]`. Lấy `:id` từ field `transferContractId` trên `GET /transfers/requests/:id`. Shape đầy đủ xem `03-mangaka.md` §5.6 |
 | `GET /transfers/contracts/:id/signatures` | `{ signatures: TransferContractSignature[] }` — mỗi chữ ký: `role` (`enum TransferSignerRole`), `signedAt` |
 | `GET /transfers/requests/:id` | `status` (`enum TransferRequestStatus`), `proposedType` (`enum TransferType`), `originalMangaka`/`requestingMangaka` mini object |
 
@@ -554,7 +614,7 @@ Nguồn: `transfer.controller.ts`, chi tiết đầy đủ ở `05-editor.md`/`0
 ## Tổng kết đối chiếu Requiment gốc & guide cũ — điểm khác biệt đáng chú ý
 
 - **Phạm vi Admin rộng hơn Requiment §2.6 mô tả:** SRS chỉ nói Admin "cấp phát tài khoản, gán vai trò, vô hiệu hóa tài khoản" (Nhóm A). Code thật cho Admin **thêm 3 nhóm quyền** không nằm trong SRS gốc: (1) cấu hình vận hành toàn hệ thống (App/Voting/Board Config — Nhóm B), (2) xem audit log cùng cấp Board Member (Nhóm C), (3) **quyền ghi ngang Editor/Board Member** trên 15 route Nhóm D (Board session lifecycle với quyền override "bỏ qua check creator", Publication versions CRUD, Survey period lifecycle, Payment pay/cancel, Task file download privileged bypass). Đây là thiết kế bổ sung hợp lý cho vai trò "quản trị hệ thống" nhưng FE cần biết để không giới hạn UI Admin chỉ còn màn quản lý user.
-- **`AppConfig` có 8 tham số, không phải 7** — verify trực tiếp `AppConfigResSchema` (`app-config-schemas.ts`) và model Prisma `AppConfig`: `coOwnerApprovalGraceDays`, `nameMaxReviewRounds`, `reputationRecommendThreshold`, `hiatusTooLongDays`, `lowVoteReliabilityThreshold`, `rankingAggregateMinCoverageRatio`, `maxUploadBytes`, `assignmentGraceDays`.
+- **`AppConfig` có 10 tham số** (đếm lại 2026-08-04 — bản trước ghi 8 là thiếu) — verify trực tiếp `CONFIG_KEYS` (`app-config.service.ts`), `AppConfigResSchema` (`app-config-schemas.ts`) và model Prisma `AppConfig`: `coOwnerApprovalGraceDays`, `storyboardMaxReviewRounds`, `reputationRecommendThreshold`, `hiatusTooLongDays`, `lowVoteReliabilityThreshold`, `rankingAggregateMinCoverageRatio`, `maxUploadBytes`, `assignmentGraceDays`, `boardRepClaimGraceDays`, `taskOverdueGraceHours`.
 - **Quirk `PATCH /board/config/:id` bắt buộc gửi field `updatedBy`** dù giá trị luôn bị ghi đè bằng userId thật từ token — nếu FE build form tự động từ Swagger/Zod schema mà không biết quirk này sẽ tưởng nhầm cần cho user tự nhập "người cập nhật" (không đúng — chỉ cần gửi giá trị bất kỳ để qua `.strict()` validation).
 - **`Error.VotingConfigNotFound` khai trong Swagger nhưng không path code nào ném ra thật** — cả `get()` lẫn `update()` của `SurveyConfigService` đều lazy-create nếu thiếu row, nên FE không cần dựng UI xử lý lỗi 404 cho 2 route `voting-config`.
 - **Admin có quyền override vòng đời Board session** (`conclude`/`phase` bỏ qua check "phải là Editor tạo phiên") — dùng cho tình huống Editor phụ trách vắng mặt, đây là chi tiết KHÔNG có trong 2 file guide cũ (`FE-API-Guide-v3.md`/`FE-Mobile-RN-Guide.md`) vì module Board (B5) và cơ chế override này được thêm sau khi 2 guide cũ được viết.

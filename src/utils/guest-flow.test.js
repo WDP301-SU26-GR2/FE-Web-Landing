@@ -2,9 +2,20 @@ import { describe, expect, it } from "vitest";
 import {
   formatCooldown,
   formatVotePeriod,
+  getMagazineOptions,
   isRankingSelectionComplete,
   toggleSeriesSelection,
 } from "./guest-flow";
+
+it("returns every unique magazine from open Guest vote periods", () => {
+  expect(
+    getMagazineOptions([
+      { magazine: "Ko có" },
+      { magazine: "AuraNVC" },
+      { magazine: " AuraNVC " },
+    ]),
+  ).toEqual(["AuraNVC", "Ko có"]);
+});
 
 describe("toggleSeriesSelection", () => {
   it("keeps the existing choices when a new choice exceeds the API limit", () => {

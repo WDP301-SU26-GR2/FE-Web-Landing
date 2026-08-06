@@ -1,6 +1,6 @@
 # §02 — Guest / Reader (Public — không cần đăng nhập)
 
-> **Nguồn:** đọc trực tiếp `BE-dev/src/modules/public/*`, `BE-dev/src/modules/survey/*` (controller/service/schema/dto/errors/messages), `BE-dev/src/core/security/guards/public-rate-limit.guard.ts`, `BE-dev/src/infrastructure/redis/cache.service.ts`, `BE-dev/prisma/schema.prisma` — **KHÔNG** copy lại từ `FE-API-Guide-v3.md`/`FE-Mobile-RN-Guide.md` cũ. Ground-truth 2026-07-27.
+> **Nguồn:** đọc trực tiếp `BE-dev/src/modules/public/*`, `BE-dev/src/modules/survey/*` (controller/service/schema/dto/errors/messages), `BE-dev/src/core/security/guards/public-rate-limit.guard.ts`, `BE-dev/src/infrastructure/redis/cache.service.ts`, `BE-dev/prisma/schema.prisma` — **KHÔNG** copy lại từ `FE-API-Guide-v3.md`/`FE-Mobile-RN-Guide.md` cũ. Ground-truth 2026-07-29 (bao gồm `author.displayName` ở public catalog/detail).
 > Đọc [`00-INDEX.md`](00-INDEX.md) để biết cách dùng bộ guide, và **bắt buộc đọc trước** [`01-conventions-and-auth.md`](01-conventions-and-auth.md) — response envelope, quy tắc lỗi, phân trang, enum dictionary (§7), FE env vars (`NEXT_PUBLIC_RECAPTCHA_SITE_KEY` dùng ở file này). File này KHÔNG lặp lại các quy ước chung đó.
 
 ---
@@ -78,6 +78,7 @@ Query:
 | `demographic` | tuỳ | enum `Demographic` | |
 | `publicationType` | tuỳ | enum `PublicationType` | |
 | `status` | tuỳ | subset `SeriesStatus` | **chỉ nhận** `SERIALIZED`·`HIATUS`·`COMPLETING`·`CANCELLING`·`COMPLETED`·`CANCELLED` (mọi trạng thái pre-serialization như `DRAFT`/`IN_REVIEW`/`PITCHED` gửi lên → 422, vì route không expose chúng ra public). Omit = trả toàn bộ tập public (6 status trên) |
+| `statusGroup` | tuỳ | literal `ACTIVE` | Gom series vẫn đang phát hành: `SERIALIZED` + `COMPLETING` + `CANCELLING`. **Không gửi đồng thời** với `status` (gửi cả hai → 422). Dùng cho tab “Đang phát hành”. |
 | `limit` | tuỳ | int | default 20, **tối đa 50** — ⚠️ khác quy ước chung "tối đa 100" ở file 01 §2, route này tự giới hạn thấp hơn |
 | `offset` | tuỳ | int | default 0 |
 
@@ -94,13 +95,20 @@ Response (`{ items, total, limit, offset }`) — mỗi item:
 | `status` | enum `SeriesStatus` | |
 | `publicationType` | enum `PublicationType` \| null | |
 | `magazine` | string \| null | |
+| `author` | `{ displayName: string \| null }` | 🆕 **Luôn là object**, không phải `null`. Chỉ có bút danh/tên hiển thị công khai của Mangaka. Nếu tác giả chưa đặt bút danh, tài khoản không còn `ACTIVE`, hoặc đã bị xoá mềm thì `displayName = null`. |
 | `publishedChapterCount` | int | số chapter đã `PUBLISHED`; 0 = "sắp ra mắt" |
+
+**Cách hiển thị tác giả:** dùng `item.author.displayName` để hiện dòng `Tác giả: …` khi giá trị khác `null`; nếu `null` thì ẩn dòng này hoặc hiện “Đang cập nhật”. Không dùng `id`, không gọi/join API nội bộ để tự tìm tên khác.
+
+**Cam kết privacy:** public API tuyệt đối **không** trả `User.id`, `email`, `name` (có thể là tên pháp lý), `phoneNumber` hay `avatar` trong field `author`. BE cũng cố ý **không fallback** từ `displayName` sang `name`.
+
+> `author` chỉ được bổ sung ở `GET /public/series` và `GET /public/series/:id`. Không có ở `/public/chapters/:id/pages`, `/vote/context`, `/vote/live`, kết quả vote hay ranking. Đặc biệt trang vote phải giữ ẩn tác giả để tránh thiên vị; không cố ghép tên tác giả từ catalog vào card vote.
 
 Lỗi: `429 Error.PublicRateLimited` (kèm `retryAfter`, xem §7).
 
 ### 2.2. `GET /public/series/:id` — Chi tiết series
 
-Response = mọi field của item ở §2.1 **cộng thêm**:
+Response = mọi field của item ở §2.1 (bao gồm `author.displayName`) **cộng thêm**:
 
 | Field | Kiểu | Ghi chú |
 |---|---|---|
@@ -337,11 +345,11 @@ Cơ chế: mỗi namespace cache có 1 counter version `cache:ver:{ns}` trên Re
 
 | Route | Namespace | TTL | Bump khi nào |
 |---|---|---|---|
-| `GET /public/series` | `pubseries` | 120s — **chỉ cache khi `offset=0`** (trang đầu); các trang sau luôn query thẳng DB | Series/chapter đổi trạng thái publish, cover, metadata (nhiều service series/chapter cùng bump) |
-| `GET /public/series/:id` | `pubseries` | 120s | như trên |
+| `GET /public/series` | `pubseries` | 120s — **chỉ cache khi `offset=0`** (trang đầu); các trang sau luôn query thẳng DB | Series/chapter đổi trạng thái publish, cover, metadata (nhiều service series/chapter cùng bump). `author.displayName` cũng nằm trong entry này, nên đổi bút danh có thể hiện chậm tối đa 120 giây. |
+| `GET /public/series/:id` | `pubseries` | 120s | như trên; gồm cả `author.displayName` |
 | `GET /public/chapters/:id/pages` | `pubseries` | 120s | như trên |
 | `GET /vote/context` | `votectx` | 60s | `SurveyPeriodService` khi tạo/đổi trạng thái kỳ bình chọn |
-| `GET /vote/results/latest`, `GET /vote/periods`, `GET /vote/results`, `GET /rankings/aggregate` | `ranking` | 60s (con trỏ "kỳ mới nhất") hoặc 3600s (dữ liệu kỳ đã REFLECTED — bất biến nên TTL dài) tuỳ loại truy vấn | `SurveyPeriodService` (đổi trạng thái kỳ) **và** khi Editor finalize ranking (`ranking-finalize-effects.service.ts`) |
+| `GET /vote/results/latest`, `GET /vote/periods`, `GET /vote/results`, `GET /rankings/aggregate` | `ranking` | 60s (con trỏ "kỳ mới nhất") hoặc 3600s (dữ liệu kỳ đã REFLECTED — bất biến nên TTL dài) tuỳ loại truy vấn | `SurveyPeriodService` (đổi trạng thái kỳ) **và** khi **Super Admin** finalize ranking (`ranking-finalize-effects.service.ts`) — từ 2026-07-29 finalize là `SUPER_ADMIN`-only, xem `07-super-admin.md` §14 |
 | `GET /vote/live` | — | **không cache** | route cố ý luôn đọc thẳng DB vì cần realtime |
 | `POST /vote/otp`, `POST /vote` | — | không cache (mutation) | |
 

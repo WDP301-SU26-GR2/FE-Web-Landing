@@ -91,6 +91,7 @@ Schema `.strict()` — gửi field lạ → 422. Vì đây là full-object upser
 | `availabilityFrom` / `availabilityTo` | string (ISO) \| null | |
 | `reputationScore` / `ratingAvg` / `ratingCount` / `isRecommended` | number/number/number/boolean | ⛔ read-only, do hệ thống tính (từ `assistant-reviews`) |
 | `displayName` / `avatar` | string \| null | ⛔ read-only, lấy từ `User` |
+| `email` / `phoneNumber` | string | ⛔ read-only, lấy từ `User` — hiển thị contact (áp cả `GET /assistants/:userId` công khai, 2026-08-04) |
 | `hasProfile` | boolean | ⛔ `false` = chưa từng PUT — mọi field profile là default rỗng |
 
 **Lỗi:** `Error.ProfileNotFound` (404) — chỉ xảy ra khi `userId` trong token không phải Assistant hợp lệ (trường hợp hiếm, gần như không FE nào gặp trong luồng bình thường).
@@ -103,6 +104,13 @@ Schema `.strict()` — gửi field lạ → 422. Vì đây là full-object upser
 - Đây là side-effect **ngầm** — PUT chỉ trả về `AssistantProfileRes`, không báo "N task đã bị tạm dừng" trong response. FE nên chủ động cảnh báo người dùng trước khi họ đổi sang `ON_LEAVE`/`UNAVAILABLE` (vd toast: "Các công việc đang làm dở sẽ tạm dừng chờ Mangaka giao lại").
 - Không có route nào cho Assistant tự mở lại task `ON_HOLD` — chỉ Mangaka `POST /tasks/:id/reassign` (giao lại, kể cả giao lại **cho chính Assistant đó** sau khi họ đổi lại `AVAILABLE`) mới đưa task về `ASSIGNED`.
 - Đổi ngược về `AVAILABLE`/`BUSY` **không** tự động mở lại task đã `ON_HOLD` — phải chờ Mangaka reassign.
+
+🆕 **Spec 30 — bạn nay được báo khi cả bộ truyện tạm ngưng.** Khi tác giả xin và biên tập viên duyệt cho bộ truyện
+`HIATUS`, backend đóng băng mọi chương chưa xuất bản và gửi thông báo `SERIES_HIATUS_STARTED` ("Bộ truyện tạm ngưng")
+cho **mọi trợ lý đang giữ việc chưa xong** trong bộ truyện đó — trước đây chỉ tác giả và biên tập viên biết, trợ lý
+cứ ngồi chờ việc mà không hiểu vì sao im ắng. Khi hoạt động lại: `SERIES_RESUMED` ("Bộ truyện hoạt động lại"), và
+hạn nộp của các chương bị đóng băng **được dời thêm đúng khoảng thời gian đã tạm ngưng**.
+Trong lúc bộ truyện `HIATUS`, việc của bạn **không bị tính trễ** và **không bị tự huỷ**.
 
 ---
 
@@ -249,6 +257,27 @@ ASSIGNED ──start()──► IN_PROGRESS ──submit()──► SUBMITTED �
 
 - Mọi trạng thái không-`APPROVED`/`CANCELLED` đều có thể bị Mangaka đưa sang `ON_HOLD` (đổi availability của chính Assistant — xem §2 — hoặc lý do khác), rồi từ `ON_HOLD` chỉ có thể → `ASSIGNED` (Mangaka `reassign`) hoặc → `CANCELLED`.
 - `APPROVED` và `CANCELLED` là **terminal** — Assistant không có hành động gì thêm trên task đó.
+- 🔴 **Thêm một lý do bị `CANCELLED` (Spec 31, 2026-08-04) — HỆ THỐNG TỰ HUỶ KHI QUÁ HẠN.**
+  Công việc quá `deadline` **cộng thêm thời gian ân hạn** (`AppConfig.taskOverdueGraceHours`, mặc định **24 giờ**)
+  sẽ bị một tiến trình nền tự chuyển sang `CANCELLED` — **không ai bấm gì cả**. Cả bạn lẫn tác giả đều nhận
+  thông báo `TASK_AUTO_CANCELLED` ("Công việc bị tự huỷ do quá hạn"); `statusReason` ghi rõ lý do.
+
+  **Chỉ 3 trạng thái bị tự huỷ:** `ASSIGNED`, `IN_PROGRESS`, `REVISION_REQUESTED` — tức việc vẫn đang ở phía bạn
+  mà **chưa nộp gì**. Các trường hợp **KHÔNG** bị tự huỷ:
+
+  | Trường hợp | Vì sao được tha |
+  |---|---|
+  | `SUBMITTED` / `UNDER_REVIEW` | Bạn **đã nộp bài** rồi — trễ là do tác giả chưa duyệt, không phải lỗi bạn |
+  | `ON_HOLD` | Đang chờ tác giả giao lại; huỷ sẽ phá luôn đường reassign |
+  | Việc thuộc chương đang `hold` | Sản xuất đã đóng băng có chủ đích |
+  | Việc thuộc bộ truyện đang `HIATUS` | Cả studio đang tạm ngưng (Spec 30) |
+  | Việc **không có** `deadline` | Không có mốc nào để tính trễ |
+
+  ⚠️ **Hệ quả cho FE:** danh sách việc của Assistant có thể **tự rụng mục** giữa hai lần tải mà người dùng không
+  làm gì. Màn danh sách nên poll lại hoặc hiển thị trạng thái `CANCELLED` kèm `statusReason` thay vì để mục
+  biến mất im lặng gây hoang mang. Nếu muốn nhắc trước, dựa vào thông báo `TASK_DEADLINE_OVERDUE:{ngày}`
+  (🆕 Spec 31 — bắn khi việc **vừa quá hạn nhưng còn trong ân hạn**; trước đây khoảng này hoàn toàn im lặng).
+
 - 🔴 **Thêm một lý do bị `CANCELLED` (Spec 26, 2026-07-28):** khi Editor trả bản thảo về sửa, Mangaka phải **mở lại**
   một giai đoạn sản xuất; BE chặn mở lại nếu giai đoạn đó (hoặc bất kỳ giai đoạn nào sau nó) **còn task đang mở**.
   Nên Mangaka có thể `cancel` task của bạn để mở lại được. Lý do sẽ nằm ở `statusReason` — FE hiển thị nó thay vì

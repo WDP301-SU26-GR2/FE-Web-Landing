@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { publicApi } from "../api/public.service";
-import { isRankingSelectionComplete } from "../utils/guest-flow";
+import { getMagazineOptions, isRankingSelectionComplete } from "../utils/guest-flow";
 
 const publicationTypes = [
   ["WEEKLY", "Hàng tuần"],
@@ -13,7 +13,9 @@ function rankChange(change) {
   return `${change > 0 ? "↑" : "↓"} ${Math.abs(change)}`;
 }
 
-export function RankingPanel({ magazines }) {
+export function RankingPanel({ openVotePeriods }) {
+  const magazinesLoading = openVotePeriods === null;
+  const magazines = getMagazineOptions(openVotePeriods || []);
   const [magazine, setMagazine] = useState("");
   const [publicationType, setPublicationType] = useState("");
   const [ranking, setRanking] = useState({ period: null, results: [] });
@@ -116,17 +118,20 @@ export function RankingPanel({ magazines }) {
       <div className="ranking-controls">
         <label>
           Tạp chí
-          <input
-            value={magazine}
-            onChange={(event) => setMagazine(event.target.value)}
-            list="public-magazines"
-            placeholder="Nhập tên tạp chí"
-          />
-          <datalist id="public-magazines">
-            {magazines.map((item) => (
-              <option key={item} value={item} />
-            ))}
-          </datalist>
+            <select
+              value={magazine}
+              onChange={(event) => setMagazine(event.target.value)}
+              disabled={magazinesLoading || !magazines.length}
+            >
+              <option value="">
+                {magazinesLoading ? "Đang tải tạp chí..." : "Chọn tạp chí"}
+              </option>
+              {magazines.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
         </label>
         <label>
           Nhịp xuất bản

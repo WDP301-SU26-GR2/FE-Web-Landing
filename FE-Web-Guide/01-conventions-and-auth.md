@@ -9,7 +9,7 @@
 
 - `00-INDEX.md` — mục lục, chọn role.
 - `01-conventions-and-auth.md` (file này) — response envelope, lỗi, phân trang, upload file, realtime, **Auth & Tài khoản** (dùng chung mọi role đã đăng nhập), **enum dictionary đầy đủ 66 enum**, **FE env vars**.
-- `02-guest-reader.md` … `07-super-admin.md` — theo role, chỉ liệt kê API **role đó gọi được** (đối chiếu `test/flows/route-roles.ts` — file sinh tự động từ Reflect metadata runtime, 277 route, **nguồn sự thật duy nhất về quyền route**).
+- `02-guest-reader.md` … `07-super-admin.md` — theo role, chỉ liệt kê API **role đó gọi được** (đối chiếu `test/flows/route-roles.ts` — file sinh tự động từ Reflect metadata runtime, 284 route, **nguồn sự thật duy nhất về quyền route**).
 - Mỗi bảng field trong các file role ghi rõ: **Bắt buộc?** (✅/⛔/tuỳ) · **Kiểu/enum** (enum thì tra ở §7 file này) · **Ghi chú** (ràng buộc, ý nghĩa nghiệp vụ).
 
 ---
@@ -33,7 +33,8 @@ Response **lỗi** luôn qua `CatchEverythingFilter` (bộ lọc lỗi DUY NHẤ
   "errors": [ { "message": "Địa chỉ email không hợp lệ", "path": "email" } ] }
 
 // Lỗi đơn (không gắn field cụ thể):
-{ "success": false, "statusCode": 403, "message": "Error.EmailNotVerified" }
+{ "success": false, "statusCode": 403,
+  "code": "Error.EmailNotVerified", "message": "Email chưa được xác thực" }
 
 // Rate-limit (OTP) — thêm code + retryAfter cho UI cooldown:
 { "success": false, "statusCode": 429, "message": "Error.OtpRateLimited",
@@ -41,7 +42,10 @@ Response **lỗi** luôn qua `CatchEverythingFilter` (bộ lọc lỗi DUY NHẤ
 ```
 
 - `message` **luôn là string**. Có `errors[]` khi lỗi gắn field cụ thể (1 issue → `message` = message của issue đó; nhiều issue → `message: "Validation failed"`).
-- Mã lỗi nghiệp vụ nằm trong `message` dạng **`Error.PascalCase`** (vd `Error.EmailNotVerified`, `Error.SeriesNotSerialized`) — **FE phân nhánh logic theo chuỗi `message` này** (đây là "code" ổn định của hệ thống hiện tại — không có field `code` riêng cho lỗi thường, trừ nhánh rate-limit OTP có thêm `code`+`retryAfter`).
+- Mã lỗi nghiệp vụ nằm trong field **`code`** dạng `Error.PascalCase`
+  (vd `Error.EmailNotVerified`, `Error.SeriesNotSerialized`) — FE phân nhánh logic theo
+  `code`; `message` là thông điệp tiếng Việt để hiển thị/fallback. Nhánh rate-limit OTP
+  có thêm `retryAfter`.
 - Prisma `P2002` (trùng unique) → 409. Lỗi không xác định → 500 (đã log server, FE hiện thông báo lỗi hệ thống chung).
 - **Validation fail = 422**, KHÔNG PHẢI 400 — đây là design quyết định cố ý (`CustomZodValidationPipe`).
 - 401 = thiếu/sai/hết hạn Bearer token. 403 = có token nhưng sai role, hoặc đúng role nhưng sai **scope sở hữu** (không phải chủ sở hữu/người được phân công). 404 = không tìm thấy (gồm id không phải ObjectId 24-hex hợp lệ — mọi route `:id` đều guard trước khi query, trả 404 sạch thay vì 500). 409 = state machine sai bước hoặc trùng dữ liệu. 503 = tính năng phụ thuộc service ngoài đang tắt (vd AI segmentation khi `AI_SERVICE_URL` rỗng).
@@ -63,7 +67,7 @@ Response **lỗi** luôn qua `CatchEverythingFilter` (bộ lọc lỗi DUY NHẤ
 
 Nguồn: `src/modules/storage/*`, ground-truth 2026-07-27.
 
-Mọi field kiểu file (`coverImage`, `originalFile`, `compositeFile`, `portfolioFiles`, `avatar`, `namePages[].fileUrl`...) lưu **object key** trên R2, KHÔNG phải URL. Luồng bắt buộc luôn là 3 bước:
+Mọi field kiểu file (`coverImage`, `originalFile`, `compositeFile`, `portfolioFiles`, `avatar`, `storyboardPages[].fileUrl`...) lưu **object key** trên R2, KHÔNG phải URL. Luồng bắt buộc luôn là 3 bước:
 
 1. **Xin URL upload** — `POST /uploads/sign` (cần Bearer, mọi role đã login đều gọi được — route access `AUTH`):
 
@@ -89,8 +93,51 @@ Lỗi có thể gặp: `Error.UnsupportedFileType` (422) · `Error.FileTooLarge`
 
 - **Mặc định polling** — không có WebSocket cho notification. `GET /notifications` kèm `unreadCount` dùng làm badge; poll 15–30s hoặc khi focus tab.
 - **Duy nhất WebSocket `/board`** (Socket.IO, namespace `/board`) cho phiên họp Hội đồng realtime (chat + tally) — chi tiết ở `06-board-member.md` §Board Session (đọc code `src/modules/board/board.gateway.ts`). Ngoài ra có namespace `/vote` **public** (không cần token) cho tally bình chọn độc giả realtime — chi tiết ở `02-guest-reader.md`.
-- **Notification** (`GET /notifications?isRead=&type=&limit=&offset=`, `PATCH /notifications/:id/read`, `PATCH /notifications/read-all` — route `AUTH`, mọi role đã login gọi được): field `type` là enum `NotificationType` (`SYSTEM`/`CONTRACT`/`TASK`/`DEADLINE`/`SURVEY`/`BOARD`/`REVIEW`); `referenceType` là chuỗi dạng `<ENTITY>_<ACTION>` (vd `TASK_ASSIGNED`, `PROPOSAL_RESUBMITTED`) dùng để deep-link — mỗi role-file liệt kê đúng các `referenceType` module đó thật sự phát ra (grep `notify(` / `notifySafe(` trong module tương ứng, đừng đoán).
+- **Notification** (`GET /notifications?isRead=&type=&limit=&offset=`, `PATCH /notifications/:id/read`, `PATCH /notifications/read-all` — route `AUTH`, mọi role đã login gọi được): `NotificationRes` gồm `id`, `type` (enum `NotificationType`: `SYSTEM`/`CONTRACT`/`TASK`/`DEADLINE`/`SURVEY`/`BOARD`/`REVIEW`), **`title`** (🆕 Spec 29 — tiêu đề tiếng Việt suy từ `referenceType`, LUÔN có kể cả notification cũ; FE render `title` làm tiêu đề), `content` (nội dung tiếng Việt), `referenceId`, `referenceType`, `isRead`, `createdAt`. `referenceType` là chuỗi `<ENTITY>_<ACTION>` (vd `TASK_ASSIGNED`, `PROPOSAL_RESUBMITTED`, `CONTRACT_REPRESENTATIVE_ASSIGNED`) dùng để deep-link — mỗi role-file liệt kê đúng các `referenceType` module đó thật sự phát ra (grep `notify(` / `notifySafe(` trong module tương ứng, đừng đoán).
 - Notification chống trùng bằng `dedupeKey` nội bộ — FE **không cần tự dedupe** danh sách trả về.
+
+#### `referenceType` MỚI (Spec 30 + 31, 2026-08-04)
+
+| `referenceType` | `title` hiển thị | Ai nhận | Deep-link tới |
+|---|---|---|---|
+| `SERIES_REQUEST_CREATED` | Yêu cầu mới từ tác giả | Biên tập viên phụ trách | Màn duyệt yêu cầu (`GET /series-requests/:id`) |
+| `SERIES_REQUEST_ACCEPTED` | Yêu cầu được chấp nhận | Tác giả | Chi tiết yêu cầu |
+| `SERIES_REQUEST_REJECTED` | Yêu cầu bị từ chối | Tác giả | Chi tiết yêu cầu — `content` **có kèm lý do từ chối** |
+| `SERIES_REQUEST_CANCELLED` | Tác giả huỷ yêu cầu | Biên tập viên phụ trách | Chi tiết yêu cầu |
+| `SERIES_WITHDRAWN_IN_REVIEW` | Tác giả rút hồ sơ | Biên tập viên đã nhận series | Chi tiết bộ truyện |
+| `SERIES_HIATUS_STARTED` | Bộ truyện tạm ngưng | Tác giả · biên tập viên · **trợ lý đang giữ việc dở** | Chi tiết bộ truyện |
+| `SERIES_RESUMED` | Bộ truyện hoạt động lại | như trên | Chi tiết bộ truyện |
+| `TASK_AUTO_CANCELLED` | Công việc bị tự huỷ do quá hạn | Trợ lý **và** tác giả | Chi tiết công việc |
+
+**Dạng có tiền tố (`PREFIX:biến`)** — FE match theo **phần trước dấu hai chấm đầu tiên**:
+
+| `referenceType` | `title` | Ghi chú |
+|---|---|---|
+| `DEADLINE_WARNING:{level}:{YYYY-MM-DD}` | Sắp đến hạn nộp | 🆕 **Spec 31 đổi định dạng** — chèn thêm `{level}` ∈ `YELLOW`/`RED`/`CRITICAL`. FE đang match prefix `DEADLINE_WARNING` **vẫn chạy đúng, không breaking**. Cùng mức trong một ngày chỉ báo 1 lần; leo thang `YELLOW → RED` sinh thông báo **mới** |
+| `TASK_DEADLINE_OVERDUE:{YYYY-MM-DD}` | Công việc đã quá hạn | 🆕 Spec 31 — việc **vừa quá hạn nhưng còn trong ân hạn** trước khi bị tự huỷ |
+| `TASK_DEADLINE_WARNING:{YYYY-MM-DD}` | Công việc sắp đến hạn | Không đổi |
+
+> ⚠️ **Đừng parse số liệu ra khỏi `content`.** Nội dung thông báo hạn nộp **cố ý không chứa % tiến độ** hay bất kỳ
+> con số biến thiên nào — vì `dedupeKey` băm cả `content`, nội dung đổi mỗi giờ sẽ đẻ ra thông báo trùng lặp.
+> Cần số liệu tiến độ thì gọi `GET /chapters/:id/progress`.
+
+#### Mã lỗi MỚI (Spec 30)
+
+| `code` | HTTP | Nghĩa (message tiếng Việt BE trả về) |
+|---|---|---|
+| `Error.SeriesRequestRequired` | 409 | "Hồ sơ đã sẵn sàng trình Hội đồng — vui lòng gửi yêu cầu rút để biên tập viên xem xét". Gặp khi gọi `POST /series/:id/withdraw` ở `DRAFT` hoặc `READY_TO_PITCH` |
+| `Error.SeriesRequestNotFound` | 404 | "Không tìm thấy yêu cầu" (kể cả id sai định dạng) |
+| `Error.SeriesRequestNotAllowed` | 409 | "Bộ truyện đang ở trạng thái không cho phép gửi yêu cầu này" |
+| `Error.OpenSeriesRequestExists` | 409 | "Bộ truyện đã có một yêu cầu đang chờ xử lý" — huỷ cái cũ trước |
+| `Error.InvalidSeriesRequestTransition` | 409 | "Yêu cầu này đã được xử lý trước đó" |
+| `Error.SeriesRequestAccessDenied` | 403 | "Bạn không có quyền với yêu cầu này" |
+
+#### Ràng buộc MỚI cho mọi field tiền (Spec 31)
+
+`valuationAmount` · `payoutAmount` · `payment.amount` · `transferAmount` nay bắt buộc: **số nguyên**
+(VND không có đơn vị nhỏ hơn đồng), `> 0` (hoặc `≥ 0` với `payoutAmount`), và **≤ 100.000.000.000** (100 tỷ).
+`unitsSold` ≤ 1.000.000.000. Vi phạm → **422** với message tiếng Việt trong `errors[]`.
+FE nên chặn ngay ở input (chỉ cho nhập số nguyên, có trần) thay vì để người dùng chạm 422.
 
 ---
 
@@ -201,8 +248,8 @@ Theo `src/core/config/env-schema.ts` (nguồn sự thật duy nhất, 2026-07-27
 - **`FranchiseConsentStatus`** (read-only): `PENDING` · `APPROVED` · `REJECTED`.
 
 ### 7.3. Name & Chapter Production
-- **`NameStatus`**: `DRAFT` · `SUBMITTED` · `IN_REVIEW` · `REVISION` · `APPROVED`.
-- **`NameKind`**: `PROPOSAL` · `CHAPTER`.
+- **`StoryboardStatus`**: `DRAFT` · `SUBMITTED` · `IN_REVIEW` · `REVISION` · `APPROVED` (chỉ Storyboard của chapter; không còn `kind`).
+- **Proposal storyboard pages**: `SeriesProposal.storyboardPages[]` là composite embedded và đi theo `ProposalStatus`, không có lifecycle riêng.
 - **`ChapterStatus`** (read-only, dẫn xuất từ Manuscript): `DRAFT` · `IN_PRODUCTION` · `COMPLETED` · `PUBLISHED`.
 - **`ChapterHoldAction`** (read-only, trong `holdHistory[]`): `HOLD` · `RESUME`.
 - **`ManuscriptStatus`**: `DRAFT` · `IN_PRODUCTION` · `EDITOR_REVIEW` · `EDITOR_REVISION` · `READY_FOR_PRINT` · `AWAITING_CO_OWNER_APPROVAL` · `PUBLISHED`.
@@ -232,7 +279,7 @@ Theo `src/core/config/env-schema.ts` (nguồn sự thật duy nhất, 2026-07-27
 
 ### 7.6. Contract & Payment (Flow 6)
 - **`ContractType`**: `FULL_BUYOUT` (NXB mua đứt) · `REVENUE_SHARE` (ăn chia — mọi quyết định lớn cần Mangaka đồng ý).
-- **`ContractStatus`** (read-only): `DRAFT` · `MANGAKA_REVIEW` · `MANGAKA_APPROVED` · `BOARD_APPROVED` · `NEGOTIATION` · `MANGAKA_SIGNED` · `ACTIVATION_PENDING` (🆕 — HĐ thay thế của giao dịch FULL_BUYOUT chờ kích hoạt, KHÔNG cho publish/PDF) · `FULLY_EXECUTED` · `FULFILLED` · `TERMINATED` · `TERMINATED_BY_BREACH` · `EXPIRED` · `VOIDED`.
+- **`ContractStatus`** (read-only, §87 flow 2-phase): `DRAFT` · `BOARD_REVIEW` (Phase 1 — Board comment + đại diện ký) · `AWAITING_MANGAKA` (Phase 2 — chờ Mangaka accept/reject) · `ACTIVATION_PENDING` (HĐ thay thế của giao dịch FULL_BUYOUT chờ transfer kích hoạt, KHÔNG cho publish/PDF) · `FULLY_EXECUTED` · `REJECTED_BY_MANGAKA` (terminal — Mangaka từ chối, Editor phải `redraft` HĐ mới) · `FULFILLED` · `TERMINATED` · `TERMINATED_BY_BREACH` · `EXPIRED` · `VOIDED`. ⚠ **Đã bỏ** `MANGAKA_REVIEW`/`MANGAKA_APPROVED`/`BOARD_APPROVED`/`NEGOTIATION`/`MANGAKA_SIGNED` (flow cũ 1-phase).
 - **`ConditionType`**: `CHAPTER_MILESTONE` · `RECURRING_CHAPTER` · `RANKING_MILESTONE` · `TIME_BOUND`.
 - **`PaymentConditionStatus`** (read-only): `PENDING` · `ACHIEVED` · `PAID` · `CANCELLED` · `MISSED` · `DISABLED`.
 - **`PaymentType`** (read-only): `CONDITION_PAYOUT` · `REVENUE_SHARE` · `COMPENSATION` · `CHAPTER_MILESTONE` · `RECURRING_CHAPTER` · `RANKING_MILESTONE` · `TIME_BOUND` · `TRANSFER`.
@@ -277,7 +324,7 @@ Theo `src/core/config/env-schema.ts` (nguồn sự thật duy nhất, 2026-07-27
 
 ## 8. Danh sách vai trò & phạm vi route (tổng quan — chi tiết từng route ở file role)
 
-Nguồn: `BE-dev/test/flows/route-roles.ts` (**sinh tự động từ Reflect metadata runtime lúc boot, 277 route, 2026-07-27** — là nguồn sự thật duy nhất về việc route nào role nào gọi được, không suy đoán từ code nghiệp vụ).
+Nguồn: `BE-dev/test/flows/route-roles.ts` (**sinh tự động từ Reflect metadata runtime lúc boot, 284 route, cập nhật 2026-08-04** — là nguồn sự thật duy nhất về việc route nào role nào gọi được, không suy đoán từ code nghiệp vụ).
 
 | Role | Số route độc quyền (`@Roles` chứa role đó) | File guide |
 |---|---|---|

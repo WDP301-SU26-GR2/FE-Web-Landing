@@ -60,6 +60,7 @@ function App() {
     [tab, setTab] = useState(""),
     [page, setPage] = useState(0);
   const [hasOpenVotePeriod, setHasOpenVotePeriod] = useState(false),
+    [openVotePeriods, setOpenVotePeriods] = useState(null),
     [reader, setReader] = useState(null),
     [detail, setDetail] = useState(null),
     [voteRoute, setVoteRoute] = useState(() => window.location.hash === "#vote");
@@ -91,8 +92,15 @@ function App() {
   useEffect(() => {
     publicApi
       .getOpenVotePeriods()
-      .then((data) => setHasOpenVotePeriod(Boolean(data.items?.length)))
-      .catch(() => setHasOpenVotePeriod(false));
+      .then((data) => {
+        const periods = data.items || [];
+        setOpenVotePeriods(periods);
+        setHasOpenVotePeriod(Boolean(periods.length));
+      })
+      .catch(() => {
+        setOpenVotePeriods([]);
+        setHasOpenVotePeriod(false);
+      });
   }, []);
   useEffect(() => {
     const syncRoute = () => setVoteRoute(window.location.hash === "#vote");
@@ -136,7 +144,6 @@ function App() {
   const closeVotePage = () => {
     window.location.hash = "top";
   };
-  const magazines = [...new Set(series.map((item) => item.magazine).filter(Boolean))];
   if (voteRoute) return <VotePage close={closeVotePage} />;
   return (
     <>
@@ -178,22 +185,10 @@ function App() {
               <div className={hasOpenVotePeriod ? "live" : ""}><strong>{hasOpenVotePeriod ? "LIVE" : "SOON"}</strong><span>{hasOpenVotePeriod ? "kỳ bình chọn đang mở" : "đón kỳ bình chọn mới"}</span></div>
             </div>
           </div>
-          <div className="hero-art">
+          <div className="hero-art" aria-hidden="true">
             <div className="sun"></div>
-            <div className="hero-card">
-              <span>ISSUE 07</span>
-              <strong>
-                Stories
-                <br />
-                that stay.
-              </strong>
-              <em>Manga Publishing</em>
-            </div>
             <div className="arc arc1"></div>
             <div className="arc arc2"></div>
-            <p>
-              読 む<br />夢 見 る
-            </p>
           </div>
         </section>
         <section className="ticker" aria-label="Đọc, bình chọn, tỏa sáng">
@@ -315,7 +310,7 @@ function App() {
                         <img src={item.coverImageUrl} alt={item.title} />
                       ) : (
                         <div className={`placeholder p${i % 5}`}>
-                          MANGA
+                          Chưa có ảnh bìa
                           <br />
                           <b>{item.title}</b>
                         </div>
@@ -399,7 +394,7 @@ function App() {
               Tham gia bình chọn <b>→</b>
             </button>
           </div>
-          <RankingPanel magazines={magazines} />
+          <RankingPanel openVotePeriods={openVotePeriods} />
         </section>
       </main>
       <footer>
@@ -430,7 +425,7 @@ function SeriesModal({ detail, close, read }) {
           ) : (
             <div>
               ✦<br />
-              KIRAMEKI
+              Chưa có ảnh bìa
             </div>
           )}
         </div>
@@ -441,7 +436,11 @@ function SeriesModal({ detail, close, read }) {
           <h2>{detail.title}</h2>
           <div className="detail-stats">
             <span>{detail.chapters?.length || 0} chương đã phát hành</span>
-            <span>{detail.mangaka?.displayName || detail.mangakaName || "Tác giả Kirameki"}</span>
+            <span>
+              {detail.author?.displayName
+                ? `Tác giả: ${detail.author.displayName}`
+                : "Tác giả: Đang cập nhật"}
+            </span>
           </div>
           <div className="tags">
             {detail.genres?.map((g) => (
