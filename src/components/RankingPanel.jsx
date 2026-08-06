@@ -29,6 +29,7 @@ export function RankingPanel({ openVotePeriods }) {
   const [aggregateLoading, setAggregateLoading] = useState(false);
   const [error, setError] = useState("");
   const [aggregateError, setAggregateError] = useState("");
+  const [rankingRetryAfter, setRankingRetryAfter] = useState(0);
 
   useEffect(() => {
     if (!magazine && magazines[0]) setMagazine(magazines[0]);
@@ -45,6 +46,7 @@ export function RankingPanel({ openVotePeriods }) {
     let active = true;
     setLoading(true);
     setError("");
+    setRankingRetryAfter(0);
     setSelectedPeriodId("");
     const query = { magazine: magazine.trim(), publicationType };
     Promise.all([
@@ -56,7 +58,11 @@ export function RankingPanel({ openVotePeriods }) {
         setRanking(latest);
         setPeriods(history.items || []);
       })
-      .catch((requestError) => active && setError(requestError.message))
+      .catch((requestError) => {
+        if (!active) return;
+        setError(requestError.message);
+        setRankingRetryAfter(requestError.retryAfter || 0);
+      })
       .finally(() => active && setLoading(false));
 
     return () => {
@@ -69,16 +75,30 @@ export function RankingPanel({ openVotePeriods }) {
     let active = true;
     setLoading(true);
     setError("");
+    setRankingRetryAfter(0);
     publicApi
       .getRankingResults(selectedPeriodId)
       .then((result) => active && setRanking(result))
-      .catch((requestError) => active && setError(requestError.message))
+      .catch((requestError) => {
+        if (!active) return;
+        setError(requestError.message);
+        setRankingRetryAfter(requestError.retryAfter || 0);
+      })
       .finally(() => active && setLoading(false));
 
     return () => {
       active = false;
     };
   }, [selectedPeriodId]);
+
+  useEffect(() => {
+    if (!rankingRetryAfter) return undefined;
+    const timer = window.setTimeout(
+      () => setRankingRetryAfter((seconds) => Math.max(0, seconds - 1)),
+      1000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [rankingRetryAfter]);
 
   const loadAggregate = async () => {
     const query = {
@@ -105,6 +125,12 @@ export function RankingPanel({ openVotePeriods }) {
   };
 
   const rankingReady = Boolean(magazine.trim() && publicationType);
+  const selectedHistoricalPeriod = periods.find(
+    (period) => period.id === selectedPeriodId,
+  );
+  const displayedIssueNumber = selectedPeriodId
+    ? ranking.issueNumber ?? selectedHistoricalPeriod?.reflectedIssueNumber ?? selectedHistoricalPeriod?.issueNumber
+    : ranking.period?.reflectedIssueNumber || ranking.period?.issueNumber;
   const aggregateReady = isRankingSelectionComplete({
     magazine,
     publicationType,
@@ -166,15 +192,20 @@ export function RankingPanel({ openVotePeriods }) {
       {!rankingReady && (
         <p className="ranking-empty">Chọn tạp chí và nhịp xuất bản để xem bảng xếp hạng.</p>
       )}
-      {error && <p className="ranking-error">{error}</p>}
+      {error && (
+        <p className="ranking-error">
+          {error}
+          {rankingRetryAfter > 0 && ` Thử lại sau ${rankingRetryAfter}s.`}
+        </p>
+      )}
       {rankingReady && loading && <p className="ranking-empty">Đang tải bảng xếp hạng...</p>}
       {rankingReady && !loading && !error && (
         <div className="rank-list">
           <div className="rank-head">
             <span>XẾP HẠNG ĐÃ CÔNG BỐ</span>
             <small>
-              {ranking.period
-                ? `Kỳ ${ranking.period.reflectedIssueNumber || ranking.period.issueNumber || ""}`
+              {displayedIssueNumber != null
+                ? `Kỳ ${displayedIssueNumber}`
                 : "Chưa có kỳ REFLECTED"}
             </small>
           </div>
@@ -183,7 +214,7 @@ export function RankingPanel({ openVotePeriods }) {
               <strong>{item.rankPosition ?? "—"}</strong>
               <div>
                 <h3>{item.seriesTitle || "Series không còn hiển thị"}</h3>
-                <p>{Math.round(item.voteCount || 0)} điểm bình chọn</p>
+                <p>{Number(item.voteCount || 0).toLocaleString("vi-VN", { maximumFractionDigits: 1 })} điểm bình chọn</p>
               </div>
               <span className={item.rankChange > 0 ? "up" : item.rankChange < 0 ? "down" : ""}>
                 {rankChange(item.rankChange)}

@@ -39,7 +39,14 @@ export function isRankingSelectionComplete({
   year,
   month,
 }) {
+  const isValidYear = Number.isInteger(Number(year)) && Number(year) >= 1970 && Number(year) <= 9999;
+  const isValidMonth = Number.isInteger(Number(month)) && Number(month) >= 1 && Number(month) <= 12;
+
   return Boolean(
-    magazine?.trim() && publicationType && year && (level !== "MONTH" || month),
+    magazine?.trim() &&
+      publicationType &&
+      (level === "MONTH" || level === "YEAR") &&
+      isValidYear &&
+      (level !== "MONTH" || isValidMonth),
   );
 }

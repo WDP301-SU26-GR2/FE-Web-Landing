@@ -6,3 +6,5 @@ export const API_BASE_URL =
 
 export const RECAPTCHA_SITE_KEY =
   import.meta.env.VITE_RECAPTCHA_SITE_KEY || "";
+
+export const IS_RECAPTCHA_CONFIGURED = Boolean(RECAPTCHA_SITE_KEY);

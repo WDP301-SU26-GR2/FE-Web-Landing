@@ -7,6 +7,7 @@ import { VotePanel } from "./components/VotePanel";
 
 const SERIES_PER_PAGE = 8;
 const VOTE_SERIES_PER_PAGE = 8;
+const ACTIVE_CATALOG_STATUSES = ["SERIALIZED", "COMPLETING", "CANCELLING"];
 const LOGO_URL =
   "https://res.cloudinary.com/dbsbfvz2f/image/upload/f_auto,q_auto/Gemini_Generated_Image_d713d4d713d4d713_hlbjvd.png";
 const SYSTEM_NAME = "Manga Creation Workflow and Publishing Management System";
@@ -40,13 +41,52 @@ const formatDate = (date) =>
     : "Đang cập nhật";
 const status = (value) =>
   ({
-    SERIALIZED: "Đang ra mắt",
+    SERIALIZED: "Đang phát hành",
     HIATUS: "Tạm nghỉ",
-    COMPLETING: "Sắp hoàn thành",
-    CANCELLING: "Sắp kết thúc",
-    COMPLETED: "Hoàn thành",
+    COMPLETING: "Sắp kết thúc",
+    CANCELLING: "Sắp bị hủy",
+    COMPLETED: "Đã kết thúc",
     CANCELLED: "Đã hủy",
   })[value] || value;
+
+async function getAllCatalogItems(filters, status) {
+  const firstPage = await publicApi.getCatalog({
+    ...filters,
+    status,
+    limit: 50,
+    offset: 0,
+  });
+  const items = [...(firstPage.items || [])];
+
+  for (let offset = 50; offset < (firstPage.total || 0); offset += 50) {
+    const nextPage = await publicApi.getCatalog({
+      ...filters,
+      status,
+      limit: 50,
+      offset,
+    });
+    items.push(...(nextPage.items || []));
+  }
+
+  return items;
+}
+
+async function getActiveCatalog(filters, page) {
+  const groups = await Promise.all(
+    ACTIVE_CATALOG_STATUSES.map((status) =>
+      getAllCatalogItems(filters, status),
+    ),
+  );
+  const items = groups
+    .flat()
+    .sort((left, right) => left.title.localeCompare(right.title, "vi"));
+  const offset = page * SERIES_PER_PAGE;
+
+  return {
+    items: items.slice(offset, offset + SERIES_PER_PAGE),
+    total: items.length,
+  };
+}
 
 function App() {
   const [series, setSeries] = useState([]),
@@ -63,32 +103,46 @@ function App() {
     [openVotePeriods, setOpenVotePeriods] = useState(null),
     [reader, setReader] = useState(null),
     [detail, setDetail] = useState(null),
-    [voteRoute, setVoteRoute] = useState(() => window.location.hash === "#vote");
-  const loadSeries = async () => {
-    setLoading(true);
-    try {
-      const data = await publicApi.getCatalog({
-        limit: SERIES_PER_PAGE,
-        offset: page * SERIES_PER_PAGE,
-        q: query,
-        genre,
-        demographic,
-        publicationType,
-        status: tab,
-      });
-      setSeries(data.items || []);
-      setTotal(data.total || 0);
-      setError("");
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+    [voteRoute, setVoteRoute] = useState(
+      () => window.location.hash === "#vote",
+    ),
+    [catalogRevision, setCatalogRevision] = useState(0);
   useEffect(() => {
-    const id = setTimeout(loadSeries, 250);
-    return () => clearTimeout(id);
-  }, [query, genre, demographic, publicationType, tab, page]);
+    let active = true;
+    const id = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const filters = {
+          q: query,
+          genre,
+          demographic,
+          publicationType,
+        };
+        const data =
+          tab === "ACTIVE"
+            ? await getActiveCatalog(filters, page)
+            : await publicApi.getCatalog({
+                ...filters,
+                limit: SERIES_PER_PAGE,
+                offset: page * SERIES_PER_PAGE,
+                status: tab,
+              });
+        if (!active) return;
+        setSeries(data.items || []);
+        setTotal(data.total || 0);
+        setError("");
+      } catch (requestError) {
+        if (active) setError(requestError.message);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      active = false;
+      clearTimeout(id);
+    };
+  }, [query, genre, demographic, publicationType, tab, page, catalogRevision]);
   useEffect(() => {
     publicApi
       .getOpenVotePeriods()
@@ -129,8 +183,10 @@ function App() {
       const data = await publicApi.getChapterPages(id);
       setReader(data);
       document.body.classList.add("locked");
+      return true;
     } catch (e) {
       setError(e.message);
+      return false;
     }
   };
   const close = () => {
@@ -180,9 +236,22 @@ function App() {
               </button>
             </div>
             <div className="hero-proof" aria-label="Thông tin thư viện">
-              <div><strong>{total || "—"}</strong><span>series đang mở</span></div>
-              <div><strong>TOP</strong><span>bảng xếp hạng công khai</span></div>
-              <div className={hasOpenVotePeriod ? "live" : ""}><strong>{hasOpenVotePeriod ? "LIVE" : "SOON"}</strong><span>{hasOpenVotePeriod ? "kỳ bình chọn đang mở" : "đón kỳ bình chọn mới"}</span></div>
+              <div>
+                <strong>{total || "—"}</strong>
+                <span>series đang mở</span>
+              </div>
+              <div>
+                <strong>TOP</strong>
+                <span>bảng xếp hạng công khai</span>
+              </div>
+              <div className={hasOpenVotePeriod ? "live" : ""}>
+                <strong>{hasOpenVotePeriod ? "LIVE" : "SOON"}</strong>
+                <span>
+                  {hasOpenVotePeriod
+                    ? "kỳ bình chọn đang mở"
+                    : "đón kỳ bình chọn mới"}
+                </span>
+              </div>
             </div>
           </div>
           <div className="hero-art" aria-hidden="true">
@@ -234,11 +303,9 @@ function App() {
             <div className="tabs">
               {[
                 ["", "Tất cả"],
-                ["SERIALIZED", "Đang phát hành"],
+                ["ACTIVE", "Đang phát hành"],
                 ["HIATUS", "Tạm nghỉ"],
-                ["COMPLETING", "Sắp hoàn thành"],
-                ["CANCELLING", "Sắp kết thúc"],
-                ["COMPLETED", "Đã hoàn thành"],
+                ["COMPLETED", "Đã kết thúc"],
                 ["CANCELLED", "Đã hủy"],
               ].map(([key, label]) => (
                 <button
@@ -268,13 +335,27 @@ function App() {
                 </option>
               ))}
             </select>
-            <select className="genre-filter" value={publicationType} onChange={(e) => { setPublicationType(e.target.value); setPage(0); }}>
+            <select
+              className="genre-filter"
+              value={publicationType}
+              onChange={(e) => {
+                setPublicationType(e.target.value);
+                setPage(0);
+              }}
+            >
               <option value="">Mọi nhịp xuất bản</option>
               <option value="WEEKLY">Hàng tuần</option>
               <option value="MONTHLY">Hàng tháng</option>
               <option value="IRREGULAR">Không định kỳ</option>
             </select>
-            <select className="genre-filter" value={demographic} onChange={(e) => { setDemographic(e.target.value); setPage(0); }}>
+            <select
+              className="genre-filter"
+              value={demographic}
+              onChange={(e) => {
+                setDemographic(e.target.value);
+                setPage(0);
+              }}
+            >
               <option value="">Mọi đối tượng</option>
               <option value="SHONEN">Shōnen</option>
               <option value="SHOJO">Shōjo</option>
@@ -292,7 +373,9 @@ function App() {
           {error && (
             <div className="alert">
               {error}
-              <button onClick={loadSeries}>Thử lại</button>
+              <button onClick={() => setCatalogRevision((value) => value + 1)}>
+                Thử lại
+              </button>
             </div>
           )}
           <div className="series-grid">
@@ -316,7 +399,9 @@ function App() {
                         </div>
                       )}
                       <span>{status(item.status)}</span>
-                      <span className="cover-action">Khám phá <b>↗</b></span>
+                      <span className="cover-action">
+                        Khám phá <b>↗</b>
+                      </span>
                     </button>
                     <div className="series-info">
                       <div>
@@ -325,6 +410,11 @@ function App() {
                           {item.publishedChapterCount} chương
                         </p>
                         <h3>{item.title}</h3>
+                        {item.author?.displayName && (
+                          <p className="series-author">
+                            Tác giả: {item.author.displayName}
+                          </p>
+                        )}
                       </div>
                       <button
                         className="round"
@@ -467,6 +557,28 @@ function SeriesModal({ detail, close, read }) {
   );
 }
 function Reader({ reader, close, go }) {
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshAttempted, setRefreshAttempted] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
+
+  useEffect(() => {
+    setRefreshing(false);
+    setRefreshAttempted(false);
+    setRefreshError("");
+  }, [reader.chapter.id]);
+
+  const refreshExpiredUrls = async () => {
+    if (refreshing || refreshAttempted) return;
+    setRefreshing(true);
+    setRefreshAttempted(true);
+    setRefreshError("");
+    const refreshed = await go(reader.chapter.id);
+    if (!refreshed) {
+      setRefreshError("Không thể làm mới ảnh chương. Vui lòng thử lại.");
+    }
+    setRefreshing(false);
+  };
+
   return (
     <div className="reader">
       <div className="reader-bar">
@@ -474,20 +586,32 @@ function Reader({ reader, close, go }) {
         <p>
           {reader.series.title} <span>/ Ch.{reader.chapter.chapterNumber}</span>
         </p>
-        <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
-          ↑ Đầu trang
-        </button>
+        <div className="reader-actions">
+          <button onClick={refreshExpiredUrls} disabled={refreshing}>
+            {refreshing ? "Đang làm mới…" : "Làm mới ảnh"}
+          </button>
+          <button
+            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+          >
+            ↑ Đầu trang
+          </button>
+        </div>
       </div>
-      <div className="reader-progress"><span>Đọc trọn chương</span><b>{reader.pages.length} trang</b></div>
+      <div className="reader-progress">
+        <span>Đọc trọn chương</span>
+        <b>{reader.pages.length} trang</b>
+      </div>
       <div className="pages">
         {reader.pages.map((p) => (
           <img
             key={p.pageNumber}
             src={p.imageUrl}
             alt={`Trang ${p.pageNumber}`}
+            onError={refreshExpiredUrls}
           />
         ))}
       </div>
+      {refreshError && <p className="reader-refresh-error">{refreshError}</p>}
       <div className="reader-nav">
         <button
           disabled={!reader.prevChapterId}
@@ -508,34 +632,62 @@ function Reader({ reader, close, go }) {
 function VotePage({ close }) {
   const [reader, setReader] = useState(null);
   const [readerError, setReaderError] = useState("");
+  const loadVoteReader = async (chapterId) => {
+    try {
+      setReaderError("");
+      setReader(await publicApi.getChapterPages(chapterId));
+      return true;
+    } catch (error) {
+      setReaderError(error.message || "Không thể mở chương truyện này.");
+      return false;
+    }
+  };
   const openLatestChapter = async (seriesId) => {
     try {
       setReaderError("");
       const series = await publicApi.getSeriesDetail(seriesId);
-      const latestChapter = [...(series.chapters || [])].sort((a, b) => b.chapterNumber - a.chapterNumber)[0];
+      const latestChapter = [...(series.chapters || [])].sort(
+        (a, b) => b.chapterNumber - a.chapterNumber,
+      )[0];
       if (!latestChapter) {
         setReaderError("Series này chưa có chương đã xuất bản để đọc.");
         return;
       }
-      setReader(await publicApi.getChapterPages(latestChapter.id));
+      await loadVoteReader(latestChapter.id);
     } catch (error) {
       setReaderError(error.message || "Không thể mở chương truyện này.");
     }
   };
-  if (reader) return <Reader reader={reader} close={() => setReader(null)} go={async (chapterId) => setReader(await publicApi.getChapterPages(chapterId))} />;
+  if (reader)
+    return (
+      <Reader
+        reader={reader}
+        close={() => setReader(null)}
+        go={loadVoteReader}
+      />
+    );
   return (
     <div className="vote-page">
       <header>
         <a className="brand" href="#top">
           <img src={LOGO_URL} alt={SYSTEM_NAME} /> <span>{SYSTEM_NAME}</span>
         </a>
-        <button className="back-link" onClick={close}>← Về thư viện</button>
+        <button className="back-link" onClick={close}>
+          ← Về thư viện
+        </button>
       </header>
       <main className="vote-page-main">
         <div className="vote-page-intro">
           <p className="eyebrow">READER'S CHOICE</p>
-          <h1>Phiếu bầu của bạn,<br /><i>ngôi sao tiếp theo.</i></h1>
-          <p>Khám phá các series đang tranh tài, chọn câu chuyện bạn muốn nhìn thấy ở kỳ phát hành tiếp theo.</p>
+          <h1>
+            Phiếu bầu của bạn,
+            <br />
+            <i>ngôi sao tiếp theo.</i>
+          </h1>
+          <p>
+            Khám phá các series đang tranh tài, chọn câu chuyện bạn muốn nhìn
+            thấy ở kỳ phát hành tiếp theo.
+          </p>
         </div>
         <div className="modal vote-modal vote-page-card">
           <VotePanel onRead={openLatestChapter} readError={readerError} />
