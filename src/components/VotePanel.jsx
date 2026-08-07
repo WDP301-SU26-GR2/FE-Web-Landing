@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { publicApi } from "../api/public.service";
 import { IS_RECAPTCHA_CONFIGURED } from "../config/env";
 import { getRecaptchaToken } from "../lib/recaptcha";
@@ -11,30 +11,22 @@ import {
 
 const SERIES_PER_PAGE = 8;
 
-async function getCatalogCoverMap(publicationType) {
+// Tải cover cho 1 trang catalog (offset=0 — có cache 120s ở BE, an toàn với rate-limit).
+// Theo Spec 02 §2.1: `coverImageUrl` ở /public/series là URL đã ký sẵn; trong /vote/context (§3.1)
+// thì `coverImage` là OBJECT KEY R2 chưa ký — ta KHÔNG tự ký lại (đỡ tốn request + đỡ lộ cap),
+// chỉ dùng từ /public/series làm nguồn phụ, các series không nằm trong page đầu giữ placeholder
+// (chữ cái đầu của title — UX vẫn đẹp, không block vote).
+async function loadCatalogCovers(publicationType) {
   const firstPage = await publicApi.getCatalog({
     publicationType,
     limit: 50,
     offset: 0,
   });
-  const covers = new Map(
-    (firstPage.items || []).map((series) => [series.id, series.coverImageUrl]),
+  return new Map(
+    (firstPage.items || [])
+      .filter((series) => series.coverImageUrl)
+      .map((series) => [series.id, series.coverImageUrl]),
   );
-
-  // The public catalog caps a page at 50. Fetch subsequent pages in sequence so
-  // opening the ballot never creates a burst that trips the public rate limiter.
-  for (let offset = 50; offset < (firstPage.total || 0); offset += 50) {
-    const page = await publicApi.getCatalog({
-      publicationType,
-      limit: 50,
-      offset,
-    });
-    (page.items || []).forEach((series) => {
-      covers.set(series.id, series.coverImageUrl);
-    });
-  }
-
-  return covers;
 }
 
 function getErrorKey(error) {
@@ -69,6 +61,7 @@ export function VotePanel({ onRead, readError }) {
   const [submitted, setSubmitted] = useState(false);
   const [periodsRevision, setPeriodsRevision] = useState(0);
   const [periodRevision, setPeriodRevision] = useState(0);
+  const otpInputRef = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -121,11 +114,11 @@ export function VotePanel({ onRead, readError }) {
         const voteContext = await publicApi.getVoteContext(selectedPeriodId);
         if (!active) return;
 
-        // A cover is cosmetic. Keep the ballot fully usable while signed public
-        // URLs are resolved, and retain placeholders when that optional request fails.
+        // Cover chỉ là cosmetic — lấy từ /public/series?offset=0 (1 request, có cache 120s).
+        // Các series nằm ngoài page đầu giữ placeholder; ballot vẫn dùng được bình thường.
         setContext(voteContext);
         setLoadingContext(false);
-        void getCatalogCoverMap(voteContext.period.publicationType)
+        void loadCatalogCovers(voteContext.period.publicationType)
           .then((covers) => {
             if (!active) return;
             setContext((current) =>
@@ -192,9 +185,19 @@ export function VotePanel({ onRead, readError }) {
     return () => window.clearTimeout(timer);
   }, [cooldown]);
 
+  // Auto-focus vào ô nhập OTP ngay khi mã được gửi thành công.
+  useEffect(() => {
+    if (otpSent) {
+      otpInputRef.current?.focus();
+    }
+  }, [otpSent]);
+
   const selectedPeriod = openPeriods.find(
     (period) => period.id === selectedPeriodId,
   );
+  // Option B (Spec 02 §3.0): WEEKLY và MONTHLY có thể mở SONG SONG. Vì spec lưu ý "Series Monthly
+  // sẽ xuất hiện ở đây ngay khi Editor mở kỳ" nên nhắc riêng MONTHLY khi thiếu — nhắc WEEKLY
+  // hay IRREGULAR sẽ ồn ào (chúng có thể đang đóng tạm theo kế hoạch phát hành).
   const hasOpenMonthlyPeriod = openPeriods.some(
     (period) => period.publicationType === "MONTHLY",
   );
@@ -364,7 +367,7 @@ export function VotePanel({ onRead, readError }) {
             {selectedPeriod && `Bạn đang bình chọn cho ${formatVotePeriod(selectedPeriod)}. `}
             Chọn tối đa {maxSelections} series trong kỳ này.
           </p>
-          {coverNotice && <p className="vote-cover-notice">{coverNotice}</p>}
+          {coverNotice && <p className="vote-cover-notice" role="status">{coverNotice}</p>}
           <div className="vote-toolbar">
             <label className="vote-search">
               <span>⌕</span>
@@ -375,6 +378,7 @@ export function VotePanel({ onRead, readError }) {
                   setSeriesPage(0);
                 }}
                 placeholder="Tìm series hoặc thể loại"
+                aria-label="Tìm kiếm series hoặc thể loại"
               />
             </label>
             <div className="vote-counter">
@@ -454,14 +458,17 @@ export function VotePanel({ onRead, readError }) {
               disabled={periodClosed || submitted || otpSent}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="Email của bạn"
+              aria-label="Địa chỉ email để nhận mã xác nhận"
             />
             {otpSent && (
               <input
+                ref={otpInputRef}
                 inputMode="numeric"
                 value={otp}
                 disabled={periodClosed || submitted}
                 onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
                 placeholder="Mã OTP gồm 6 số"
+                aria-label="Mã xác nhận OTP gồm 6 chữ số"
               />
             )}
             <div className="vote-actions">

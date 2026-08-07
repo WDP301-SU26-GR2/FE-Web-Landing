@@ -12,9 +12,25 @@ export class ApiError extends Error {
 }
 
 export async function request(path, options = {}) {
+  // Always bypass browser HTTP cache. The BE already has its own short-lived
+  // caches (60-120s) for public data; without this, browsers revalidate with
+  // the same etag and serve a stale empty payload from disk (e.g. catalog was
+  // empty when the tab was first loaded, then BE was populated — FE never
+  // sees the new data until hard refresh).
+  const {
+    cache: _ignoredCache,
+    headers: optionHeaders,
+    ...rest
+  } = options;
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...options.headers },
-    ...options,
+    cache: "no-store",
+    ...rest,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+      ...optionHeaders,
+    },
   });
   const payload = await response.json().catch(() => ({}));
 

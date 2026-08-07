@@ -9,7 +9,8 @@ export const publicApi = {
   getSeriesDetail: (seriesId) => request(`/public/series/${seriesId}`),
 
   /** GET /public/chapters/:id/pages — read chapter pages */
-  getChapterPages: (chapterId) => request(`/public/chapters/${chapterId}/pages`),
+  getChapterPages: (chapterId) =>
+    request(`/public/chapters/${chapterId}/pages`),
 
   /** GET /public/magazines — public danh mục tạp chí (Spec 15 §2.4) cho Landing GUEST dựng dropdown */
   getMagazines: () => request("/public/magazines"),
@@ -23,7 +24,8 @@ export const publicApi = {
     request(`/vote/context${toQueryString({ periodId })}`),
 
   /** GET /vote/live?periodId=... — live tally (NOT cached) */
-  getVoteLive: (periodId) => request(`/vote/live${toQueryString({ periodId })}`),
+  getVoteLive: (periodId) =>
+    request(`/vote/live${toQueryString({ periodId })}`),
 
   /** POST /vote/otp — ALWAYS requires captchaToken (v3) */
   sendVoteOtp: ({ identity, captchaToken }) =>
@@ -41,11 +43,15 @@ export const publicApi = {
 
   /** GET /vote/results/latest — REFLECTED ranking for the latest period */
   getLatestRankingResults: ({ magazine, publicationType }) =>
-    request(`/vote/results/latest${toQueryString({ magazine, publicationType })}`),
+    request(
+      `/vote/results/latest${toQueryString({ magazine, publicationType })}`,
+    ),
 
   /** GET /vote/periods — list of REFLECTED periods (history dropdown) */
   getVotePeriods: ({ magazine, publicationType, limit = 12 }) =>
-    request(`/vote/periods${toQueryString({ magazine, publicationType, limit })}`),
+    request(
+      `/vote/periods${toQueryString({ magazine, publicationType, limit })}`,
+    ),
 
   /** GET /vote/results?surveyPeriodId=... — results of a specific period */
   getRankingResults: (surveyPeriodId) =>

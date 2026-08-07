@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { publicApi } from "../api/public.service";
+import { API_BASE_URL } from "../config/env";
 import { isRankingSelectionComplete, listMagazineNames } from "../utils/guest-flow";
 
 const publicationTypes = [
@@ -7,6 +8,12 @@ const publicationTypes = [
   ["MONTHLY", "Hàng tháng"],
   ["IRREGULAR", "Không định kỳ"],
 ];
+const publicationTypeLabels = Object.fromEntries(publicationTypes);
+
+// Chỉ log diagnostic khi build dev — tránh lộ base URL + payload trong production bundle.
+const isDev = import.meta.env.DEV;
+const devLog = (...args) => isDev && console.info(...args);
+const devWarn = (...args) => isDev && console.warn(...args);
 
 function rankChange(change) {
   if (!change) return "—";
@@ -39,13 +46,20 @@ export function RankingPanel({ openVotePeriods }) {
   useEffect(() => {
     let active = true;
     setMagazinesLoading(true);
+    devLog("[RankingPanel] fetching /public/magazines from", API_BASE_URL);
     publicApi
       .getMagazines()
       .then((result) => {
+        devLog("[RankingPanel] /public/magazines payload:", result);
         if (!active) return;
-        setMagazines(listMagazineNames(result.items || []));
+        const items = (result && result.items) || [];
+        setMagazines(listMagazineNames(items));
+        if (!items.length) {
+          setError("Chưa có tạp chí nào trong hệ thống; vui lòng quay lại sau.");
+        }
       })
       .catch((requestError) => {
+        devWarn("[RankingPanel] /public/magazines failed:", requestError);
         if (!active) return;
         setMagazines([]);
         setError(requestError.message);
@@ -57,16 +71,16 @@ export function RankingPanel({ openVotePeriods }) {
     };
   }, []);
 
-  // Khi VotePanel truyền xuống openPeriods, nếu chưa chọn magazine thì pre-select tạp chí của kỳ đang mở.
+  // Gộp 2 effect cũ: pre-select từ openPeriods (UX) HOẶC mặc định chọn tạp chí đầu tiên.
+  // Thứ tự ưu tiên: tạp chí của kỳ vote đang mở (nếu có trong danh mục) > tạp chí đầu tiên.
   useEffect(() => {
-    if (magazine || !Array.isArray(openVotePeriods) || openVotePeriods.length === 0) return;
-    const fromOpenPeriod = openVotePeriods[0]?.magazine?.trim();
-    if (fromOpenPeriod && magazines.includes(fromOpenPeriod)) setMagazine(fromOpenPeriod);
-  }, [openVotePeriods, magazines, magazine]);
-
-  useEffect(() => {
-    if (!magazine && magazines[0]) setMagazine(magazines[0]);
-  }, [magazine, magazines]);
+    if (magazine || !magazines.length) return;
+    const fromOpenPeriod = openVotePeriods?.[0]?.magazine?.trim();
+    const candidate = fromOpenPeriod && magazines.includes(fromOpenPeriod)
+      ? fromOpenPeriod
+      : magazines[0];
+    setMagazine(candidate);
+  }, [magazine, magazines, openVotePeriods]);
 
   useEffect(() => {
     if (!magazine.trim() || !publicationType) {
@@ -133,6 +147,13 @@ export function RankingPanel({ openVotePeriods }) {
     return () => window.clearTimeout(timer);
   }, [rankingRetryAfter]);
 
+  // Reset aggregate khi đổi tạp chí / nhịp xuất bản / loại tổng hợp —
+  // aggregate cũ không còn phù hợp với bộ lọc mới và sẽ gây hiểu nhầm.
+  useEffect(() => {
+    setAggregate(null);
+    setAggregateError("");
+  }, [magazine, publicationType, level]);
+
   const loadAggregate = async () => {
     const query = {
       magazine: magazine.trim(),
@@ -161,9 +182,16 @@ export function RankingPanel({ openVotePeriods }) {
   const selectedHistoricalPeriod = periods.find(
     (period) => period.id === selectedPeriodId,
   );
+  // Số kỳ hiển thị: nếu user chọn 1 kỳ lịch sử → ưu tiên reflectedIssueNumber từ periods[];
+  // nếu đang xem "Kỳ mới nhất" → lấy từ ranking.period; fallback issueNumber.
   const displayedIssueNumber = selectedPeriodId
-    ? ranking.issueNumber ?? selectedHistoricalPeriod?.reflectedIssueNumber ?? selectedHistoricalPeriod?.issueNumber
-    : ranking.period?.reflectedIssueNumber || ranking.period?.issueNumber;
+    ? (selectedHistoricalPeriod?.reflectedIssueNumber ??
+       selectedHistoricalPeriod?.issueNumber ??
+       ranking.issueNumber ??
+       null)
+    : (ranking.period?.reflectedIssueNumber ??
+       ranking.period?.issueNumber ??
+       null);
   const aggregateReady = isRankingSelectionComplete({
     magazine,
     publicationType,
@@ -213,7 +241,10 @@ export function RankingPanel({ openVotePeriods }) {
             disabled={!rankingReady || loading}
             onChange={(event) => setSelectedPeriodId(event.target.value)}
           >
-            <option value="">Kỳ mới nhất</option>
+            <option value="">
+              Kỳ mới nhất
+              {ranking.period ? ` (${ranking.period.magazine || magazine} · ${publicationTypeLabels[ranking.period.publicationType] || ranking.period.publicationType})` : ""}
+            </option>
             {periods.map((period) => (
               <option key={period.id} value={period.id}>
                 Kỳ #{period.reflectedIssueNumber || period.issueNumber || period.id}
@@ -242,6 +273,12 @@ export function RankingPanel({ openVotePeriods }) {
                 : "Chưa có kỳ REFLECTED"}
             </small>
           </div>
+          {selectedPeriodId && selectedHistoricalPeriod && (
+            <p className="ranking-historical-notice">
+              Đang xem kết quả kỳ #{selectedHistoricalPeriod.reflectedIssueNumber || selectedHistoricalPeriod.issueNumber}.
+              Kỳ mới nhất được chọn ở trên.
+            </p>
+          )}
           {ranking.results?.map((item) => (
             <div className="rank-row" key={item.seriesId}>
               <strong>{item.rankPosition ?? "—"}</strong>

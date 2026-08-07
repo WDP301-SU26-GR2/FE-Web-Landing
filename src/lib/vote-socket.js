@@ -13,6 +13,9 @@ export function subscribeToVoteTally(periodId, onTally, onStatus) {
   socket.emit("joinPeriod", { periodId }, ({ status }) => {
     if (status !== "SUCCESS") {
       onStatus("Kỳ bình chọn không còn mở để cập nhật trực tiếp.");
+      // CLOSED/INVALID → kỳ không còn cập nhật realtime; đóng socket để khỏi giữ
+      // kết nối rỗng vô thời hạn tới khi component unmount (Spec 02 §5).
+      socket.disconnect();
     }
   });
 

@@ -56,13 +56,17 @@ export function isRankingSelectionComplete({
   month,
 }) {
   const isValidYear = Number.isInteger(Number(year)) && Number(year) >= 1970 && Number(year) <= 9999;
-  const isValidMonth = Number.isInteger(Number(month)) && Number(month) >= 1 && Number(month) <= 12;
+  // `month` chỉ cần validate khi level=MONTH (BE bắt buộc) — level=YEAR ignore tháng.
+  const requireMonth = level === "MONTH";
+  const isValidMonth = requireMonth
+    ? Number.isInteger(Number(month)) && Number(month) >= 1 && Number(month) <= 12
+    : true;
 
   return Boolean(
     magazine?.trim() &&
       publicationType &&
       (level === "MONTH" || level === "YEAR") &&
       isValidYear &&
-      (level !== "MONTH" || isValidMonth),
+      isValidMonth,
   );
 }
